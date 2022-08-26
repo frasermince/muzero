@@ -47,7 +47,7 @@ def main(argv):
     params = (representation_params, dynamics_params, prediction_params)
     params_actor = GlobalParamsActor.remote(params)
 
-    self_play_worker = SelfPlayWorker.remote.play(num_envs, env_batch_size,
+    self_play_worker = SelfPlayWorker.play.remote(num_envs, env_batch_size,
                                                   worker_key, params_actor, memory_actor)
     experiment_class = get_experiment_class(memory_actor, params_actor)
     train_worker = run_jaxline.remote(
