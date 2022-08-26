@@ -9,7 +9,7 @@ from jax import random
 from model import MuZeroNet
 
 
-@ray.remote(resources={"TPU": 1})
+@ray.remote
 class GlobalParamsActor(object):
     def __init__(self, params):
         self.params = params
@@ -56,7 +56,7 @@ def main(argv):
     ray.wait([train_worker, self_play_worker.play.remote()])
 
 
-@ray.remote
+@ray.remote(resources={"TPU": 1})
 def run_jaxline(experiment_class, argv, memory_actor, params_actor):
     platform.main(experiment_class, argv, memory_actor, params_actor)
 
