@@ -47,10 +47,12 @@ def main(argv):
     params = (representation_params, dynamics_params, prediction_params)
     params_actor = GlobalParamsActor.remote(params)
 
-    SelfPlayWorker.remote(num_envs, env_batch_size,
-                          worker_key, params_actor, memory_actor)
+    self_play_worker = SelfPlayWorker.remote(num_envs, env_batch_size,
+                                             worker_key, params_actor, memory_actor)
     experiment_class = get_experiment_class(memory_actor, params_actor)
-    run_jaxline.remote(experiment_class, argv, memory_actor, params_actor)
+    train_worker = run_jaxline.remote(
+        experiment_class, argv, memory_actor, params_actor)
+    ray.wait([train_worker, self_play_worker])
 
 
 @ray.remote
