@@ -61,13 +61,16 @@ head_setup_commands:
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0 google-api-python-client
   - rm -rf muzero
-  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout distributed-memory && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout distributed-memory && poetry env use 3.9 && poetry install && poetry run pip install envpool
 
 # Install Jax and other dependencies on TPU
 worker_setup_commands:
-  - sudo chown -R $(whoami) /opt/conda/*
-  - conda create -y -n "ray" python=3.9
-  - conda activate ray && echo 'conda activate ray' >> ~/.bashrc
+  - sleep 2
+  - sleep 2
+  - sudo apt update
+  - sudo apt install software-properties-common
+  - sudo add-apt-repository -y ppa:deadsnakes/ppa
+  - sudo apt install -y python3.9
   - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0

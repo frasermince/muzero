@@ -30,6 +30,7 @@ class GlobalParamsActor(object):
 
 def main(argv):
     ray.init(address='auto')
+    print("***RESOURCES", ray.global_state.cluster_resources())
     flags.mark_flag_as_required('config')
     print(sys.argv[1])
     rollout_size = 5
