@@ -148,7 +148,7 @@ def train(
     writer: Optional[utils.Writer],
     periodic_actions=(),
 ):
-    train_disable_jit(
+    return train_disable_jit(
         experiment_class,
         config,
         checkpointer,

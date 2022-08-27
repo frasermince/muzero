@@ -77,15 +77,15 @@ class TensorBoardLogger:
     def __init__(self, config, mode: str):
         """Initializes the writer."""
         log_dir = os.path.join(config.checkpoint_dir, mode)
-        self._writer = tf.summary.create_file_writer(log_dir)
+        # self._writer = tf.summary.create_file_writer(log_dir)
 
     def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
         """Writes scalars to stdout."""
         global_step = int(global_step)
-        with self._writer.as_default():
-            for k, v in scalars.items():
-                tf.summary.scalar(k, v, step=global_step)
-        self._writer.flush()
+        # with self._writer.as_default():
+        #     for k, v in scalars.items():
+        #         tf.summary.scalar(k, v, step=global_step)
+        # self._writer.flush()
 
     def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
         """Writes images to writers that support it."""
@@ -95,7 +95,7 @@ class TensorBoardLogger:
                 # Tensorboard only accepts [B, H, W, C] but we support [H, W] also.
                 if v.ndim == 2:
                     v = v[None, ..., None]
-                tf.summary.image(k, v, step=global_step)
+                # tf.summary.image(k, v, step=global_step)
         self._writer.flush()
 
 
