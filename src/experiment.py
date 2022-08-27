@@ -20,7 +20,6 @@ from self_play import play_game, SelfPlayWorker
 from chex import assert_axis_dimension, assert_shape
 import envpool
 from jax.tree_util import register_pytree_node
-from threading import Thread
 import pickle
 import jax.lax as lax
 import ray
@@ -42,7 +41,7 @@ def get_experiment_class(memory_actor, params_actor):
             '_opt_state': 'opt_state',
         }
 
-        def __init__(self, mode, memory, init_rng, config, learning_rate=1e-4, normalize_advantages=False, batch_size=128):
+        def __init__(self, mode, init_rng, config, learning_rate=1e-4, normalize_advantages=False, batch_size=128):
             super(MuzeroExperiment, self).__init__(
                 mode=mode, init_rng=init_rng)
 
@@ -50,81 +49,77 @@ def get_experiment_class(memory_actor, params_actor):
             self.params_actor = params_actor
             print("***EXPERIMENT SELF PLAY",
                   jax.device_count(), jax.default_backend())
-            with jax.default_device(jax.devices()[7]):
-                self.global_step = 0
-                self.mode = mode
-                self.init_rng = init_rng
-                self.config = config
+            self.global_step = 0
+            self.mode = mode
+            self.init_rng = init_rng
+            self.config = config
 
-                self._params = None
-                self._state = None
-                self._opt_state = None
+            self._params = None
+            self._state = None
+            self._opt_state = None
 
-                self.normalize_advantages = normalize_advantages
-                self.game_reward = 0
-                self.eps = np.finfo(np.float32).eps.item()
-                self.steps_to_train = 4
-                self.rollout_size = 5
-                self.discount_factor = 0.99
-                self.reward = 0
-                self.games = 0
-                self.epoch_length = 20000
-                self.batch_size = batch_size
-                self.lr_init = 0.05
-                self.lr_decay_rate = 0.1
-                self.lr_decay_steps = 350e3
-                self.n_step = 10
-                self.last_ten = Memory(10)
-                self.last_hundred = Memory(100)
-                self.rollout_size = 5
-                self.key = random.PRNGKey(0)
-                multiple = 8
-                self.num_envs = multiple * 16
-                env_batch_size = int(self.num_envs / 4)
-                self.key, worker_key = random.split(self.key)
+            self.normalize_advantages = normalize_advantages
+            self.game_reward = 0
+            self.eps = np.finfo(np.float32).eps.item()
+            self.steps_to_train = 4
+            self.rollout_size = 5
+            self.discount_factor = 0.99
+            self.reward = 0
+            self.games = 0
+            self.epoch_length = 20000
+            self.batch_size = batch_size
+            self.lr_init = 0.05
+            self.lr_decay_rate = 0.1
+            self.lr_decay_steps = 350e3
+            self.n_step = 10
+            self.last_ten = Memory(10)
+            self.last_hundred = Memory(100)
+            self.rollout_size = 5
+            self.key = random.PRNGKey(0)
+            multiple = 8
+            self.num_envs = multiple * 16
+            env_batch_size = int(self.num_envs / 4)
+            self.key, worker_key = random.split(self.key)
 
-                self.self_play_worker = SelfPlayWorker.remote(
-                    self.num_envs, env_batch_size, worker_key)
+            register_pytree_node(
+                GameMemory,
+                experience_replay.game_memory_flatten,
+                experience_replay.game_memory_unflatten
+            )
+            register_pytree_node(
+                SelfPlayMemory,
+                experience_replay.self_play_flatten,
+                experience_replay.self_play_unflatten
+            )
+            register_pytree_node(
+                MuZeroMemory,
+                experience_replay.muzero_flatten,
+                experience_replay.muzero_unflatten
+            )
+            cpu = jax.devices("cpu")[0]
+            # with jax.default_device(cpu):
+            #   filehandler = open("./starting_memories.obj", 'rb')
+            #   self.memory = pickle.load(filehandler)
+            #   self.memory = jax.device_put(self.memory, cpu)
+            #   self.memory.length = 5000
+            #   self.memory.games = list(self.memory.games)
+            #   filehandler.close()
+            #   filehandler = None
 
-                register_pytree_node(
-                    GameMemory,
-                    experience_replay.game_memory_flatten,
-                    experience_replay.game_memory_unflatten
-                )
-                register_pytree_node(
-                    SelfPlayMemory,
-                    experience_replay.self_play_flatten,
-                    experience_replay.self_play_unflatten
-                )
-                register_pytree_node(
-                    MuZeroMemory,
-                    experience_replay.muzero_flatten,
-                    experience_replay.muzero_unflatten
-                )
-                cpu = jax.devices("cpu")[0]
-                # with jax.default_device(cpu):
-                #   filehandler = open("./starting_memories.obj", 'rb')
-                #   self.memory = pickle.load(filehandler)
-                #   self.memory = jax.device_put(self.memory, cpu)
-                #   self.memory.length = 5000
-                #   self.memory.games = list(self.memory.games)
-                #   filehandler.close()
-                #   filehandler = None
+            self._train_input = None
+            self.game_count = 0
 
-                self._train_input = None
-                self.game_count = 0
+            # self.env.async_reset()
 
-                # self.env.async_reset()
+            self._update_func = jax.pmap(self._update_func, axis_name='i',
+                                         donate_argnums=(1), in_axes=(None, None, (0, 0, 0, 0, 0, 0), None, None), out_axes=(None, None, 0, 0), devices=jax.devices()[4: 8])
 
-                self._update_func = jax.pmap(self._update_func, axis_name='i',
-                                             donate_argnums=(1), in_axes=(None, None, (0, 0, 0, 0, 0, 0), None, None), out_axes=(None, None, 0, 0), devices=jax.devices()[4: 8])
-
-                self.entropy_scaling = 0.01
-                self.automatic_optimization = False
-                self.target_update_rate = 100
-                self._params = None
-                self._target_params = None
-                self.training_device_count = int(jax.device_count() / 2)
+            self.entropy_scaling = 0.01
+            self.automatic_optimization = False
+            self.target_update_rate = 100
+            self._params = None
+            self._target_params = None
+            self.training_device_count = int(jax.device_count() / 2)
 
         def train_loop(
             self,
@@ -169,28 +164,27 @@ def get_experiment_class(memory_actor, params_actor):
                 self._lr_schedule)
 
             self._opt_state = self._optimizer.init(
-                self.params_actor.get_params.remote())
+                ray.get(self.params_actor.get_params.remote()))
 
-            with jax.default_device(jax.devices()[7]):
-                with jl_utils.log_activity("training loop"):
-                    while True:
-                        with jax.profiler.StepTraceAnnotation(
-                                "train", step_num=state.global_step):
-                            scalar_outputs = self.step(
-                                global_step=state.global_step, rng=step_key, writer=writer)
+            with jl_utils.log_activity("training loop"):
+                while True:
+                    with jax.profiler.StepTraceAnnotation(
+                            "train", step_num=state.global_step):
+                        scalar_outputs = self.step(
+                            global_step=state.global_step, rng=step_key, writer=writer)
 
-                            t = time.time()
-                            # Update state's (scalar) global step (for checkpointing).
-                            # global_step_devices will be back in sync with this after the call
-                            # to next_device_state below.
-                            state.global_step += 1
-                            global_step_devices, (step_key, state.train_step_rng) = (
-                                next_device_state(global_step_devices,
-                                                  state.train_step_rng,
-                                                  host_id_devices))
+                        t = time.time()
+                        # Update state's (scalar) global step (for checkpointing).
+                        # global_step_devices will be back in sync with this after the call
+                        # to next_device_state below.
+                        state.global_step += 1
+                        global_step_devices, (step_key, state.train_step_rng) = (
+                            next_device_state(global_step_devices,
+                                              state.train_step_rng,
+                                              host_id_devices))
 
-                        for action in periodic_actions:
-                            action(t, state.global_step, scalar_outputs)
+                    for action in periodic_actions:
+                        action(t, state.global_step, scalar_outputs)
         #  _             _
         # | |_ _ __ __ _(_)_ __
         # | __| '__/ _` | | '_ \
@@ -205,11 +199,13 @@ def get_experiment_class(memory_actor, params_actor):
             if self._train_input is None:
                 self._initialize_train()
 
-            while self.memory_actor.item_count.remote() < self.batch_size:
-                if self.memory_actor.item_count.remote() != self.game_count:
-                    print("GAMES", self.memory_actor.item_count.remote())
-                    self.game_count = self.memory_actor.item_count.remote()
+            item_count = ray.get(self.memory_actor.item_count.remote())
+            while item_count < self.batch_size:
+                if item_count != self.game_count:
+                    print("GAMES", item_count)
+                    self.game_count = item_count
                 time.sleep(1)
+                item_count = ray.get(self.memory_actor.item_count.remote())
             # file = open('starting_memories.obj', 'wb')
             # pickle.dump(self.memory, file)
             # file.close()
@@ -257,7 +253,8 @@ def get_experiment_class(memory_actor, params_actor):
                 self._lr_schedule)
 
             # Check we haven't already restored params
-            if self._params is None:
+            params = self.params_actor.get_params.remote()
+            if params is None:
                 logging.info('Initializing parameters.')
 
                 # init_net = jax.pmap(lambda *a: self.network.initialize_networks(*a))
@@ -269,7 +266,7 @@ def get_experiment_class(memory_actor, params_actor):
 
                 # self._params = init_net(init_rng)
                 # self.target_params = self._params
-                self._opt_state = init_opt(self._params)
+                self._opt_state = init_opt(params)
 
         # def _load_data(self, split, is_training, batch_dims):
         #   """Wrapper for dataset loading."""
