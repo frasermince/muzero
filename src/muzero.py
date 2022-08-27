@@ -52,6 +52,7 @@ def main(argv):
 
     flags.mark_flag_as_required('config')
     jaxline_worker = jaxline_platform.main(experiment_class, argv)
+    print("WORKER", jaxline_worker)
     ray.get([jaxline_worker,
              self_play_worker.play.remote()])
     print("AFTER WAIT")
@@ -95,5 +96,4 @@ def main(argv):
 #     app.run(lambda argv: app_run(argv))
 
 
-main()
 app.run(lambda argv: main(argv))
