@@ -71,6 +71,7 @@ worker_setup_commands:
   - sudo apt install software-properties-common
   - sudo add-apt-repository -y ppa:deadsnakes/ppa
   - sudo apt install -y python3.9
+  - sudo apt install ffmpeg libsm6 libxext6  -y
   - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0

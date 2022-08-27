@@ -35,7 +35,7 @@ def main(argv):
     print(sys.argv[1])
     rollout_size = 5
 
-    multiple = 8
+    multiple = 4
     num_envs = multiple * 16
     env_batch_size = int(num_envs / 4)
     key = random.PRNGKey(0)
@@ -51,14 +51,14 @@ def main(argv):
     self_play_worker = SelfPlayWorker.remote(num_envs, env_batch_size,
                                              worker_key, params_actor, memory_actor)
     experiment_class = get_experiment_class(memory_actor, params_actor)
-    train_worker = run_jaxline.remote(
-        experiment_class, argv, memory_actor, params_actor)
-    ray.wait([train_worker, self_play_worker.play.remote()])
+    ray.wait([run_jaxline.remote(experiment_class, argv),
+             self_play_worker.play.remote()])
+    print("AFTER WAIT")
 
 
 @ray.remote(resources={"TPU": 1})
-def run_jaxline(experiment_class, argv, memory_actor, params_actor):
-    platform.main(experiment_class, argv, memory_actor, params_actor)
+def run_jaxline(experiment_class, argv):
+    platform.main(experiment_class, argv)
 
 
 app.run(lambda argv: main(argv))
