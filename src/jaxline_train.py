@@ -64,8 +64,7 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
 
 
 @utils.disable_pmap_jit
-@ray.remote(resources={"TPU": 1})
-def train(
+def train_disable_jit(
     experiment_class,
     config,
     checkpointer: utils.Checkpointer,
@@ -139,6 +138,24 @@ def train(
     # collective so the non-master hosts cannot exit before the master writes out
     # the final checkpoint.
     utils.rendezvous()
+
+
+@ray.remote(resources={"TPU": 1})
+def train(
+    experiment_class,
+    config,
+    checkpointer: utils.Checkpointer,
+    writer: Optional[utils.Writer],
+    periodic_actions=(),
+):
+    train_disable_jit(
+        experiment_class,
+        config,
+        checkpointer,
+        writer,
+        periodic_actions,
+
+    )
 
 
 @utils.disable_pmap_jit
