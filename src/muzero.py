@@ -51,7 +51,7 @@ def main(argv):
     self_play_worker = SelfPlayWorker.remote(num_envs, env_batch_size,
                                              worker_key, params_actor, memory_actor)
     experiment_class = get_experiment_class(memory_actor, params_actor)
-    ray.wait([run_jaxline.remote(experiment_class, argv),
+    ray.get([run_jaxline.remote(experiment_class, argv),
              self_play_worker.play.remote()])
     print("AFTER WAIT")
 
