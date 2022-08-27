@@ -352,7 +352,6 @@ class SelfPlayWorker(object):
             jnp.array(self.initial_observation), (0, 2, 3, 1))
         starting_policy = jnp.ones(18) / 18
         for i in range(32):
-            print(i)
             self.starting_memories.observations = self.starting_memories.observations.at[:, i].set(
                 self.initial_observation[0])
             self.starting_memories.policies = self.starting_memories.policies.at[:, i].set(

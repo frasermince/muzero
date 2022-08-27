@@ -2,11 +2,11 @@ from absl import flags, app
 import sys
 import ray
 from experiment import get_experiment_class
-from jaxline import platform
 from experience_replay import MuZeroMemory
 from self_play import SelfPlayWorker
 from jax import random
 from model import MuZeroNet
+import jaxline_platform
 
 
 @ray.remote
@@ -31,8 +31,6 @@ class GlobalParamsActor(object):
 def main(argv):
     ray.init(address='auto')
     print("***RESOURCES", ray.nodes())
-    flags.mark_flag_as_required('config')
-    print(sys.argv[1])
     rollout_size = 5
 
     multiple = 4
@@ -51,14 +49,51 @@ def main(argv):
     self_play_worker = SelfPlayWorker.remote(num_envs, env_batch_size,
                                              worker_key, params_actor, memory_actor)
     experiment_class = get_experiment_class(memory_actor, params_actor)
-    ray.get([run_jaxline.remote(experiment_class, argv),
+
+    flags.mark_flag_as_required('config')
+    jaxline_worker = jaxline_platform.main(experiment_class, argv)
+    ray.get([jaxline_worker,
              self_play_worker.play.remote()])
     print("AFTER WAIT")
 
 
-@ray.remote(resources={"TPU": 1})
-def run_jaxline(experiment_class, argv):
-    platform.main(experiment_class, argv)
+# @ray.remote(resources={"TPU": 1})
+# def run_jaxline(experiment_class):
+#     _NODE_IP = flags.DEFINE_string(
+#         name="node-ip-address",
+#         default="",
+#         help="ray node ip",
+#     )
+#     _NODE_PORT = flags.DEFINE_string(
+#         name="node-manager-port",
+#         default="",
+#         help="ray node ip",
+#     )
+
+#     _OBJECT_STORE = flags.DEFINE_string(
+#         name="object-store-name",
+#         default="",
+#         help="ray node ip",
+#     )
+
+#     _RAYLET_NAME = flags.DEFINE_string(
+#         name="raylet-name",
+#         default="",
+#         help="ray node ip",
+#     )
+
+#     _REDIS_ADDRESS = flags.DEFINE_string(
+#         name="redis-address",
+#         default="",
+#         help="ray node ip",
+#     )
+
+#     def app_run(argv):
+#         print("ARGV", argv)
+#         flags.mark_flag_as_required('config')
+#         platform.main(experiment_class, argv)
+#     app.run(lambda argv: app_run(argv))
 
 
+main()
 app.run(lambda argv: main(argv))
