@@ -261,12 +261,14 @@ def play_step(i, p):  # params, current_game_buffer, env_handle, recv, send):
         current_games, info['env_id'], steps), axis=1)
     observations = jnp.expand_dims(get_observations(
         current_games, info['env_id'], steps, new_observation), axis=1)
+    print("SHAPE", observations.shape)
     observations = jnp.reshape(observations, (8, int(
         observations.shape[0] / 8), 1, 32, 96, 96, 3))
     past_actions = jnp.reshape(
         past_actions, (8, int(past_actions.shape[0] / 8), 1, 32))
     assert_shape(observations, [8, None, 1, 32, 96, 96, 3])
 
+    print("***STEP")
     # TODO use 0 for past_observations upon changing to multigame memory
     policy, value, search_env = monte_carlo_fn(
         params, observations, past_actions, temperature)
@@ -325,7 +327,6 @@ class SelfPlayWorker(object):
         print("***DEVICE COUNT SELF PLAY",
               jax.device_count(), jax.default_backend())
         print("***DEVICE COUNT SELF PLAY", jax.devices())
-        print("***DEVICE COUNT SELF PLAY", jax.local_devices())
         register_pytree_node(
             SelfPlayMemory,
             experience_replay.self_play_flatten,
@@ -380,6 +381,7 @@ class SelfPlayWorker(object):
             self.memory.append.remote(finished_game_buffer)
 
     def play(self):
+        print("***PLAY")
         if self.game_buffer == None:
             self.game_buffer = self.starting_memories
         if self.play_step < 500000:

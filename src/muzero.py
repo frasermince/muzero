@@ -46,15 +46,15 @@ def main(argv):
     params = (representation_params, dynamics_params, prediction_params)
     params_actor = GlobalParamsActor.remote(params)
 
-    self_play_worker = SelfPlayWorker.remote(num_envs, env_batch_size,
-                                             worker_key, params_actor, memory_actor)
+    self_play_workers_count = 2
+    self_play_workers = [SelfPlayWorker.remote(num_envs, env_batch_size,
+                                               worker_key, params_actor, memory_actor) for i in range(self_play_workers_count)]
     experiment_class = get_experiment_class(memory_actor, params_actor)
-
-    self_play_workers = 1
 
     flags.mark_flag_as_required('config')
     workers = [jaxline_platform.main(experiment_class, argv)]
-    workers += [self_play_worker.play.remote() for i in self_play_workers]
+    workers += [self_play_worker.play.remote()
+                for self_play_worker in self_play_workers]
     ray.get(workers)
     print("AFTER WAIT")
 
