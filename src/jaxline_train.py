@@ -64,7 +64,8 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
 
 
 @utils.disable_pmap_jit
-def train_disable_jit(
+@ray.remote(resources={"TPU": 1})
+def train(
     experiment_class,
     config,
     checkpointer: utils.Checkpointer,
@@ -140,22 +141,21 @@ def train_disable_jit(
     utils.rendezvous()
 
 
-@ray.remote(resources={"TPU": 1})
-def train(
-    experiment_class,
-    config,
-    checkpointer: utils.Checkpointer,
-    writer: Optional[utils.Writer],
-    periodic_actions=(),
-):
-    return train_disable_jit(
-        experiment_class,
-        config,
-        checkpointer,
-        writer,
-        periodic_actions,
+# def train(
+#     experiment_class,
+#     config,
+#     checkpointer: utils.Checkpointer,
+#     writer: Optional[utils.Writer],
+#     periodic_actions=(),
+# ):
+#     train_disable_jit(
+#         experiment_class,
+#         config,
+#         checkpointer,
+#         writer,
+#         periodic_actions,
 
-    )
+#     )
 
 
 @utils.disable_pmap_jit
