@@ -50,11 +50,12 @@ def main(argv):
                                              worker_key, params_actor, memory_actor)
     experiment_class = get_experiment_class(memory_actor, params_actor)
 
+    self_play_workers = 1
+
     flags.mark_flag_as_required('config')
-    jaxline_worker = jaxline_platform.main(experiment_class, argv)
-    print("WORKER", jaxline_worker)
-    ray.get([jaxline_worker,
-             self_play_worker.play.remote()])
+    workers = [jaxline_platform.main(experiment_class, argv)]
+    workers += [self_play_worker.play.remote() for i in self_play_workers]
+    ray.get(workers)
     print("AFTER WAIT")
 
 

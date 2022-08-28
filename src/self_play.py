@@ -11,8 +11,10 @@ from operator import itemgetter
 from jax.config import config
 import sys
 from chex import assert_axis_dimension, assert_shape
+import experience_replay
 from experience_replay import SelfPlayMemory
 import ray
+from jax.tree_util import register_pytree_node
 
 
 # config.update('jax_disable_jit', True)
@@ -235,7 +237,7 @@ def add_item(i, data):
 
 # TODO explore if steps are recorded correctly due to async gym
 monte_carlo_fn = jax.pmap(lambda *x: jax.vmap(lambda *y: monte_carlo_tree_search(
-    *y), (None, 0, 0, None))(*x), in_axes=((None, 0, 0, None)), devices=jax.devices()[0: 4])
+    *y), (None, 0, 0, None))(*x), in_axes=((None, 0, 0, None)))
 get_actions = jax.vmap(lambda current_games, index, steps: lax.dynamic_slice_in_dim(
     current_games.actions[index], steps[index] - 32, 32, axis=0).squeeze(), (None, 0, None))
 get_observations = jax.vmap(lambda current_games, index, steps, new_observation: jnp.append(lax.dynamic_slice_in_dim(
@@ -259,11 +261,11 @@ def play_step(i, p):  # params, current_game_buffer, env_handle, recv, send):
         current_games, info['env_id'], steps), axis=1)
     observations = jnp.expand_dims(get_observations(
         current_games, info['env_id'], steps, new_observation), axis=1)
-    observations = jnp.reshape(observations, (4, int(
-        observations.shape[0] / 4), 1, 32, 96, 96, 3))
+    observations = jnp.reshape(observations, (8, int(
+        observations.shape[0] / 8), 1, 32, 96, 96, 3))
     past_actions = jnp.reshape(
-        past_actions, (4, int(past_actions.shape[0] / 4), 1, 32))
-    assert_shape(observations, [4, None, 1, 32, 96, 96, 3])
+        past_actions, (8, int(past_actions.shape[0] / 8), 1, 32))
+    assert_shape(observations, [8, None, 1, 32, 96, 96, 3])
 
     # TODO use 0 for past_observations upon changing to multigame memory
     policy, value, search_env = monte_carlo_fn(
@@ -324,6 +326,11 @@ class SelfPlayWorker(object):
               jax.device_count(), jax.default_backend())
         print("***DEVICE COUNT SELF PLAY", jax.devices())
         print("***DEVICE COUNT SELF PLAY", jax.local_devices())
+        register_pytree_node(
+            SelfPlayMemory,
+            experience_replay.self_play_flatten,
+            experience_replay.self_play_unflatten
+        )
         self.env = envpool.make("Pong-v5", env_type="gym", num_envs=num_envs,
                                 batch_size=env_batch_size, img_height=96, img_width=96, gray_scale=False, stack_num=1)
         self.initial_observation = self.env.reset()

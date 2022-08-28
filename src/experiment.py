@@ -286,16 +286,14 @@ def get_experiment_class(memory_actor, params_actor):
             cpu = jax.devices("cpu")[0]
             # key = jax.device_put(self.key, cpu)
             key = self.key
-            device = jax.devices()[7]
             while True:
-                with jax.default_device(device):
 
-                    with jax.default_device(cpu):
-                        # import code; code.interact(local=dict(globals(), **locals()))
-                        key, data = self.memory_actor.fetch_games.remote(
-                            jax.device_put(key, cpu), self.batch_size)
+                with jax.default_device(cpu):
+                    # import code; code.interact(local=dict(globals(), **locals()))
+                    key, data = ray.get(self.memory_actor.fetch_games.remote(
+                        jax.device_put(key, cpu), self.batch_size))
                     memories = memory_sample(jax.device_put(
-                        data, device), self.memory_actor.get_rollout_size.remote(), self.memory_actor.n_step.remote(), self.memory_actor.get_discount_rate.remote())
+                        data, device), ray.get(self.memory_actor.get_rollout_size.remote()), ray.get(self.memory_actor.n_step.remote()), ray.get(self.memory_actor.get_discount_rate.remote()))
                     observations = np.reshape(memories["observations"], (self.training_device_count, int(
                         self.batch_size / self.training_device_count), 32, 96, 96, 3))
                     actions = np.reshape(memories["actions"], (self.training_device_count, int(
@@ -405,7 +403,7 @@ def get_experiment_class(memory_actor, params_actor):
             loss = policy_loss + value_loss + reward_loss
 
             priority_loss = loss / \
-                (self.memory_actor.item_count.remote() * 200 * priorities)
+                (ray.get(self.memory_actor.item_count.remote()) * 200 * priorities)
             priority_loss = priority_loss.mean()
             scaled_loss = priority_loss / self.training_device_count
             # self.log("loss", loss, prog_bar=True, on_step=True)
