@@ -1,0 +1,98 @@
+# This config is an example TPU config allowing you to run
+# https://github.com/Yard1/swarm-jax on GCP TPUs
+# Replace provider.project_id with your GCP project id
+# After the nodes are up, run:
+#   ray attach tpu.yaml swarm_tpu_jax.py swarm-jax/data/enwik8 [NUM_TPUS] [EPOCHS]
+
+# A unique identifier for the head node and workers of this cluster.
+cluster_name: muzero
+
+# The maximum number of worker nodes to launch in addition to the head
+# node.
+max_workers: 7
+
+available_node_types:
+  ray_head_default:
+    resources: { "CPU": 2 }
+    node_config:
+      machineType: n2-standard-2
+      disks:
+        - boot: true
+          autoDelete: true
+          type: PERSISTENT
+          initializeParams:
+            diskSizeGb: 50
+            # See https://cloud.google.com/compute/docs/images for more images
+            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+  ray_tpu:
+    min_workers: 7
+    resources: { "TPU": 1 } # use TPU custom resource in your code
+    node_config:
+      # Only v2-8 and v3-8 accelerator types are currently supported.
+      # Support for TPU pods will be added in the future.
+      acceleratorType: v2-8
+      runtimeVersion: tpu-vm-base
+      schedulingConfig:
+        # Set to false to use non-preemptible TPUs
+        preemptible: true
+
+provider:
+  type: gcp
+  region: us-central1
+  availability_zone: us-central1-f
+  project_id: muzero-355517 # replace with your GCP project id
+
+setup_commands: []
+
+# Specify the node type of the head node (as configured above).
+# TPUs cannot be head nodes (will raise an exception).
+head_node_type: ray_head_default
+
+# Compute instances have python 3.7, but TPUs have 3.8 - need to update
+# Install Jax and other dependencies on the Compute head node
+head_setup_commands:
+  # Two first lines are a workaround for ssh timing out
+  - sleep 2
+  - sleep 2
+  - sudo chown -R $(whoami) /opt/conda/*
+  - conda create -y -n "ray" python=3.9
+  - conda activate ray && echo 'conda activate ray' >> ~/.bashrc
+  - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
+  - source $HOME/.poetry/env
+  - pip3 install ray[default]==2.0.0 google-api-python-client
+  - rm -rf muzero
+  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout distributed-memory && poetry env use 3.9 && poetry install && poetry run pip install envpool
+
+# Install Jax and other dependencies on TPU
+worker_setup_commands:
+  - sleep 2
+  - sleep 2
+  - sudo apt update
+  - sudo apt install software-properties-common
+  - sudo add-apt-repository -y ppa:deadsnakes/ppa
+  - sudo apt install -y python3.9
+  - sudo apt install ffmpeg libsm6 libxext6  -y
+  - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
+  - source $HOME/.poetry/env
+  - pip3 install ray[default]==2.0.0
+  - rm -rf muzero
+  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout distributed-memory && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+  - cd muzero && poetry run ray stop
+  - >-
+    ulimit -n 65536;
+    cd muzero && poetry run ray start
+    --head
+    --port=6379
+    --object-manager-port=8076
+    --autoscaling-config=~/ray_bootstrap_config.yaml
+# Command to start ray on worker nodes. You don't need to change this.
+worker_start_ray_commands:
+  - cd muzero && poetry run ray stop
+  - >-
+    ulimit -n 65536;
+    cd muzero && poetry run ray start
+    --address=$RAY_HEAD_IP:6379
+    --object-manager-port=8076

@@ -11,8 +11,10 @@ from operator import itemgetter
 from jax.config import config
 import sys
 from chex import assert_axis_dimension, assert_shape
+import experience_replay
 from experience_replay import SelfPlayMemory
 import ray
+from jax.tree_util import register_pytree_node
 
 
 # config.update('jax_disable_jit', True)
@@ -235,7 +237,7 @@ def add_item(i, data):
 
 # TODO explore if steps are recorded correctly due to async gym
 monte_carlo_fn = jax.pmap(lambda *x: jax.vmap(lambda *y: monte_carlo_tree_search(
-    *y), (None, 0, 0, None))(*x), in_axes=((None, 0, 0, None)), devices=jax.devices()[0: 4])
+    *y), (None, 0, 0, None))(*x), in_axes=((None, 0, 0, None)))
 get_actions = jax.vmap(lambda current_games, index, steps: lax.dynamic_slice_in_dim(
     current_games.actions[index], steps[index] - 32, 32, axis=0).squeeze(), (None, 0, None))
 get_observations = jax.vmap(lambda current_games, index, steps, new_observation: jnp.append(lax.dynamic_slice_in_dim(
@@ -259,12 +261,16 @@ def play_step(i, p):  # params, current_game_buffer, env_handle, recv, send):
         current_games, info['env_id'], steps), axis=1)
     observations = jnp.expand_dims(get_observations(
         current_games, info['env_id'], steps, new_observation), axis=1)
-    observations = jnp.reshape(observations, (4, int(
-        observations.shape[0] / 4), 1, 32, 96, 96, 3))
+    # print("SHAPE ONE", observations.shape)
+    # print("DEVICE", observations.device())
+    observations = jnp.reshape(observations, (8, int(
+        observations.shape[0] / 8), 1, 32, 96, 96, 3))
+    # print("SHAPE", observations.shape)
     past_actions = jnp.reshape(
-        past_actions, (4, int(past_actions.shape[0] / 4), 1, 32))
-    assert_shape(observations, [4, None, 1, 32, 96, 96, 3])
+        past_actions, (8, int(past_actions.shape[0] / 8), 1, 32))
+    assert_shape(observations, [8, None, 1, 32, 96, 96, 3])
 
+    # print("***STEP")
     # TODO use 0 for past_observations upon changing to multigame memory
     policy, value, search_env = monte_carlo_fn(
         params, observations, past_actions, temperature)
@@ -307,23 +313,28 @@ def play_game(key, params, self_play_memories, env, steps, rewards, halting_step
     # TODO set 200 per environment
     params = jax.device_put(params, jax.devices()[0])
     steps_ready = False
-    for i in range(100):
+    while True:
         (key, params, env, self_play_memories, steps, rewards, _, positive_rewards, negative_rewards) = play_step(
             i, (key, params, env, self_play_memories, steps, rewards, temperature, positive_rewards, negative_rewards))
         if ((steps >= halting_steps).sum() >= 8):
             steps_ready = True
             break
 
-    return key, self_play_memories, steps, rewards, steps_ready, positive_rewards, negative_rewards
+    # return key, self_play_memories, steps, rewards, steps_ready, positive_rewards, negative_rewards
 
 
 @ray.remote(resources={"TPU": 1})
 class SelfPlayWorker(object):
-    def __init__(self, num_envs, env_batch_size, key):
+    def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory):
         print("***DEVICE COUNT SELF PLAY",
               jax.device_count(), jax.default_backend())
         print("***DEVICE COUNT SELF PLAY", jax.devices())
-        print("***DEVICE COUNT SELF PLAY", jax.local_devices())
+        register_pytree_node(
+            SelfPlayMemory,
+            experience_replay.self_play_flatten,
+            experience_replay.self_play_unflatten
+        )
+        self.worker_id = worker_id
         self.env = envpool.make("Pong-v5", env_type="gym", num_envs=num_envs,
                                 batch_size=env_batch_size, img_height=96, img_width=96, gray_scale=False, stack_num=1)
         self.initial_observation = self.env.reset()
@@ -333,52 +344,60 @@ class SelfPlayWorker(object):
         self.negative_rewards = jnp.zeros(128)
         self.halting_steps = 232
         # self.halting_steps = 70
-        self.global_step = 0
+        self.play_step = 0
         self.key = jax.device_put(key, jax.devices()[0])
         self.rewards = jnp.zeros(num_envs)
+        self.steps = jnp.zeros(num_envs, dtype=jnp.int32) + 32
+        self.game_buffer = None
+        self.params_actor = params_actor
+        self.memory = memory
 
-        with jax.default_device(jax.devices()[0]):
-            self.starting_memories = SelfPlayMemory(
-                num_envs, self.halting_steps)
-            self.starting_memories.populate()
+        # with jax.default_device(jax.devices()[0]):
+        self.starting_memories = SelfPlayMemory(
+            num_envs, self.halting_steps)
+        self.starting_memories.populate()
 
-        with jax.default_device(jax.devices()[0]):
-            self.initial_observation = self.env.reset()
-            self.initial_observation = jnp.transpose(
-                jnp.array(self.initial_observation), (0, 2, 3, 1))
-            starting_policy = jnp.ones(18) / 18
-            for i in range(32):
-                self.starting_memories.observations = self.starting_memories.observations.at[:, i].set(
-                    self.initial_observation[0])
-                self.starting_memories.policies = self.starting_memories.policies.at[:, i].set(
-                    starting_policy)
-                # self.starting_memories.append((self.initial_observation[0], 0, starting_policy, jnp.broadcast_to(jnp.array(1.0), (1)), 0))
+        # with jax.default_device(jax.devices()[0]):
+        self.initial_observation = self.env.reset()
+        self.initial_observation = jnp.transpose(
+            jnp.array(self.initial_observation), (0, 2, 3, 1))
+        starting_policy = jnp.ones(18) / 18
+        for i in range(32):
+            self.starting_memories.observations = self.starting_memories.observations.at[:, i].set(
+                self.initial_observation[0])
+            self.starting_memories.policies = self.starting_memories.policies.at[:, i].set(
+                starting_policy)
+            # self.starting_memories.append((self.initial_observation[0], 0, starting_policy, jnp.broadcast_to(jnp.array(1.0), (1)), 0))
 
         self.steps = jnp.zeros(
             self.starting_memories.games, dtype=jnp.int32) + 32
         self.game_buffer = self.starting_memories
 
-    def play(self, params, steps, game_buffer=None):
-        if game_buffer == None:
-            game_buffer = self.starting_memories
-        if self.global_step < 500000:
+    def save_memories(self):
+        cpu = jax.devices("cpu")[0]
+        finished_indices = jnp.argwhere(
+            self.steps >= self.halting_steps).squeeze()
+        finished_game_buffer, self.steps = self.game_buffer.output_game_buffer(
+            finished_indices, self.steps, self.initial_observation)
+        with jax.default_device(cpu):
+            finished_game_buffer = jax.device_put(finished_game_buffer, cpu)
+            self.memory.append.remote(finished_game_buffer)
+
+    def play(self):
+        print("***PLAY")
+        if self.game_buffer == None:
+            self.game_buffer = self.starting_memories
+        if self.play_step < 500000:
             temperature = 1
-        elif self.global_step < 750000:
+        elif self.play_step < 750000:
             temperature = 0.5
         else:
             temperature = 0.25
-
-        self.key, game_buffer, steps, self.rewards, steps_ready, self.positive_rewards, self.negative_rewards = play_game(
-            self.key,
-            params,
-            game_buffer,
-            self.env,
-            steps,
-            self.rewards,
-            self.halting_steps,
-            temperature,
-            self.positive_rewards,
-            self.negative_rewards
-        )
-        print("***RESULT", game_buffer, steps, steps_ready)
-        return game_buffer, steps, steps_ready
+        while True:
+            params = ray.get(self.params_actor.get_target_params.remote())
+            params = jax.device_put(params, jax.devices()[0])
+            (self.key, _, self.env, self.game_buffer, self.steps, self.rewards, _, self.positive_rewards, self.negative_rewards) = play_step(
+                self.play_step, (self.key, params, self.env, self.game_buffer, self.steps, self.rewards, temperature, self.positive_rewards, self.negative_rewards))
+            self.play_step += 1
+            if ((self.steps >= self.halting_steps).sum() >= 8):
+                self.save_memories()
