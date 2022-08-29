@@ -46,8 +46,8 @@ def main(argv):
     params = (representation_params, dynamics_params, prediction_params)
     params_actor = GlobalParamsActor.remote(params)
 
-    self_play_workers_count = 2
-    self_play_workers = [SelfPlayWorker.remote(num_envs, env_batch_size,
+    self_play_workers_count = 5
+    self_play_workers = [SelfPlayWorker.remote(i, num_envs, env_batch_size,
                                                worker_key, params_actor, memory_actor) for i in range(self_play_workers_count)]
     experiment_class = get_experiment_class(memory_actor, params_actor)
 

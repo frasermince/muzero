@@ -41,7 +41,7 @@ def get_experiment_class(memory_actor, params_actor):
             '_opt_state': 'opt_state',
         }
 
-        def __init__(self, mode, init_rng, config, learning_rate=1e-4, normalize_advantages=False, batch_size=128):
+        def __init__(self, mode, init_rng, config, learning_rate=1e-4, normalize_advantages=False, batch_size=64):
             super(MuzeroExperiment, self).__init__(
                 mode=mode, init_rng=init_rng)
 
@@ -119,7 +119,7 @@ def get_experiment_class(memory_actor, params_actor):
             self.target_update_rate = 100
             self._params = None
             self._target_params = None
-            self.training_device_count = int(jax.device_count() / 2)
+            self.training_device_count = int(jax.device_count())
 
         def train_loop(
             self,
@@ -216,7 +216,7 @@ def get_experiment_class(memory_actor, params_actor):
              game_indices, step_indices, priorities) = inputs
             params, self._opt_state, scalars, value_difference = (
                 self._update_func(
-                    self.params_actor.get_params.remote(), self._opt_state, (
+                    ray.get(self.params_actor.get_params.remote()), self._opt_state, (
                         observations, actions, policies, values, rewards, priorities), rng, global_step
                 ))
             self.params_actor.set_params.remote(params)
@@ -235,7 +235,7 @@ def get_experiment_class(memory_actor, params_actor):
                         value_difference[i, -1], game_indices[i], step_indices[i])
             if global_step % self.target_update_rate == 0:
                 print("PRIORITIES", value_difference)
-                print("GAMES", self.memory_actor.item_count.remote())
+                print("GAMES", ray.get(self.memory_actor.item_count.remote()))
                 self.params_actor.sync_target_params.remote()
 
             scalars = jl_utils.get_first(scalars)
@@ -285,6 +285,7 @@ def get_experiment_class(memory_actor, params_actor):
             # global_batch_size = self.config.training.batch_size
             cpu = jax.devices("cpu")[0]
             # key = jax.device_put(self.key, cpu)
+            device = jax.devices()[0]
             key = self.key
             while True:
 
@@ -293,7 +294,7 @@ def get_experiment_class(memory_actor, params_actor):
                     key, data = ray.get(self.memory_actor.fetch_games.remote(
                         jax.device_put(key, cpu), self.batch_size))
                     memories = memory_sample(jax.device_put(
-                        data, device), ray.get(self.memory_actor.get_rollout_size.remote()), ray.get(self.memory_actor.n_step.remote()), ray.get(self.memory_actor.get_discount_rate.remote()))
+                        data, device), ray.get(self.memory_actor.get_rollout_size.remote()), ray.get(self.memory_actor.get_n_step.remote()), ray.get(self.memory_actor.get_discount_rate.remote()))
                     observations = np.reshape(memories["observations"], (self.training_device_count, int(
                         self.batch_size / self.training_device_count), 32, 96, 96, 3))
                     actions = np.reshape(memories["actions"], (self.training_device_count, int(

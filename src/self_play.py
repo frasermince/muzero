@@ -261,14 +261,16 @@ def play_step(i, p):  # params, current_game_buffer, env_handle, recv, send):
         current_games, info['env_id'], steps), axis=1)
     observations = jnp.expand_dims(get_observations(
         current_games, info['env_id'], steps, new_observation), axis=1)
-    print("SHAPE", observations.shape)
+    # print("SHAPE ONE", observations.shape)
+    # print("DEVICE", observations.device())
     observations = jnp.reshape(observations, (8, int(
         observations.shape[0] / 8), 1, 32, 96, 96, 3))
+    # print("SHAPE", observations.shape)
     past_actions = jnp.reshape(
         past_actions, (8, int(past_actions.shape[0] / 8), 1, 32))
     assert_shape(observations, [8, None, 1, 32, 96, 96, 3])
 
-    print("***STEP")
+    # print("***STEP")
     # TODO use 0 for past_observations upon changing to multigame memory
     policy, value, search_env = monte_carlo_fn(
         params, observations, past_actions, temperature)
@@ -323,7 +325,7 @@ def play_game(key, params, self_play_memories, env, steps, rewards, halting_step
 
 @ray.remote(resources={"TPU": 1})
 class SelfPlayWorker(object):
-    def __init__(self, num_envs, env_batch_size, key, params_actor, memory):
+    def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory):
         print("***DEVICE COUNT SELF PLAY",
               jax.device_count(), jax.default_backend())
         print("***DEVICE COUNT SELF PLAY", jax.devices())
@@ -332,6 +334,7 @@ class SelfPlayWorker(object):
             experience_replay.self_play_flatten,
             experience_replay.self_play_unflatten
         )
+        self.worker_id = worker_id
         self.env = envpool.make("Pong-v5", env_type="gym", num_envs=num_envs,
                                 batch_size=env_batch_size, img_height=96, img_width=96, gray_scale=False, stack_num=1)
         self.initial_observation = self.env.reset()
