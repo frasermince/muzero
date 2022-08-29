@@ -15,7 +15,8 @@ import experience_replay
 from experience_replay import SelfPlayMemory
 import ray
 from jax.tree_util import register_pytree_node
-
+import os
+from utils import confirm_tpus
 
 # config.update('jax_disable_jit', True)
 jnp.set_printoptions(threshold=sys.maxsize)
@@ -323,12 +324,10 @@ def play_game(key, params, self_play_memories, env, steps, rewards, halting_step
     # return key, self_play_memories, steps, rewards, steps_ready, positive_rewards, negative_rewards
 
 
-@ray.remote(resources={"TPU": 1})
+@ray.remote(resources={"TPU": 1}, max_restarts=5)
 class SelfPlayWorker(object):
     def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory):
-        print("***DEVICE COUNT SELF PLAY",
-              jax.device_count(), jax.default_backend())
-        print("***DEVICE COUNT SELF PLAY", jax.devices())
+        confirm_tpus()
         register_pytree_node(
             SelfPlayMemory,
             experience_replay.self_play_flatten,

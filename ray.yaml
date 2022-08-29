@@ -32,6 +32,7 @@ available_node_types:
       # Support for TPU pods will be added in the future.
       acceleratorType: v2-8
       runtimeVersion: tpu-vm-base
+      networkConfig: { enableExternalIps: False }
       schedulingConfig:
         # Set to false to use non-preemptible TPUs
         preemptible: true
@@ -48,6 +49,12 @@ setup_commands: []
 # TPUs cannot be head nodes (will raise an exception).
 head_node_type: ray_head_default
 
+file_mounts: {
+#    "/path1/on/remote/machine": "/path1/on/local/machine",
+#    "/path2/on/remote/machine": "/path2/on/local/machine",
+     "~/muzero/": "."
+}
+
 # Compute instances have python 3.7, but TPUs have 3.8 - need to update
 # Install Jax and other dependencies on the Compute head node
 head_setup_commands:
@@ -60,8 +67,8 @@ head_setup_commands:
   - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0 google-api-python-client
-  - rm -rf muzero
-  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool
+  # - rm -rf muzero
+  - cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool
 
 # Install Jax and other dependencies on TPU
 worker_setup_commands:
@@ -75,8 +82,8 @@ worker_setup_commands:
   - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0
-  - rm -rf muzero
-  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+  # - rm -rf muzero
+  - cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
