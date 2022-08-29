@@ -2,7 +2,7 @@ from absl import flags, app
 import sys
 import ray
 from experiment import get_experiment_class
-from experience_replay import MuZeroMemory
+from experience_replay import MuZeroMemory, SampleQueue
 from self_play import SelfPlayWorker
 from jax import random
 from model import MuZeroNet
@@ -38,7 +38,7 @@ def main(argv):
     env_batch_size = int(num_envs / 4)
     key = random.PRNGKey(0)
 
-    network_key, worker_key = random.split(key)
+    network_key, worker_key, sample_key = random.split(key, num=3)
     memory_actor = MuZeroMemory.remote(5000, rollout_size=rollout_size)
     network = MuZeroNet()
     network_key, representation_params, dynamics_params, prediction_params = network.initialize_networks_individual(
@@ -49,10 +49,13 @@ def main(argv):
     self_play_workers_count = 5
     self_play_workers = [SelfPlayWorker.remote(i, num_envs, env_batch_size,
                                                worker_key, params_actor, memory_actor) for i in range(self_play_workers_count)]
-    experiment_class = get_experiment_class(memory_actor, params_actor)
+    sample_actor = SampleQueue.remote(sample_key, 64, memory_actor)
+    workers = [sample_actor.run.remote()]
+    experiment_class = get_experiment_class(
+        memory_actor, params_actor, sample_actor)
 
     flags.mark_flag_as_required('config')
-    workers = [jaxline_platform.main(experiment_class, argv)]
+    workers += [jaxline_platform.main(experiment_class, argv)]
     workers += [self_play_worker.play.remote()
                 for self_play_worker in self_play_workers]
     ray.get(workers)

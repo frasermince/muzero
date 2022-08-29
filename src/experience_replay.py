@@ -5,6 +5,7 @@ import jax
 from model import scatter
 from functools import partial
 import ray
+import time
 
 # TODO Add per game memory for chess and go
 
@@ -105,6 +106,60 @@ class SelfPlayMemory:
 
     def __len__(self):
         return self.actions.shape[0]
+
+
+@ray.remote
+class SampleQueue:
+    def __init__(self, key, batch_size, memory_actor):
+        self.queue = []
+        self.training_device_count = 8
+        self.key = key
+        self.batch_size = batch_size
+        self.memory_actor = memory_actor
+        self.game_count = 0
+
+    def pop(self):
+        return self.queue.pop(0)
+
+    def has_items(self):
+        return len(self.queue) > 0
+
+    def run(self):
+        cpu = jax.devices("cpu")[0]
+        # key = jax.device_put(self.key, cpu)
+        device = jax.devices()[0]
+        key = self.key
+        item_count = ray.get(self.memory_actor.item_count.remote())
+        while item_count < self.batch_size:
+            if item_count != self.game_count:
+                print("GAMES", item_count)
+                self.game_count = item_count
+            time.sleep(1)
+            item_count = ray.get(self.memory_actor.item_count.remote())
+
+        while True:
+            with jax.default_device(cpu):
+                # import code; code.interact(local=dict(globals(), **locals()))
+                key, data = ray.get(self.memory_actor.fetch_games.remote(
+                    jax.device_put(key, cpu), self.batch_size))
+                memories = memory_sample(jax.device_put(
+                    data, device), ray.get(self.memory_actor.get_rollout_size.remote()), ray.get(self.memory_actor.get_n_step.remote()), ray.get(self.memory_actor.get_discount_rate.remote()))
+                observations = np.reshape(memories["observations"], (self.training_device_count, int(
+                    self.batch_size / self.training_device_count), 32, 96, 96, 3))
+                actions = np.reshape(memories["actions"], (self.training_device_count, int(
+                    self.batch_size / self.training_device_count), 6, 32))
+                policies = np.reshape(memories["policies"], (self.training_device_count, int(
+                    self.batch_size / self.training_device_count), 6, 18))
+                values = np.reshape(memories["values"], (self.training_device_count, int(
+                    self.batch_size / self.training_device_count), 6))
+                rewards = np.reshape(memories["rewards"], (self.training_device_count, int(
+                    self.batch_size / self.training_device_count), 6))
+                game_indices = np.array(memories["game_indices"])
+                step_indices = np.array(memories["step_indices"])
+                priorities = np.reshape(memories["priority"], (self.training_device_count, int(
+                    self.batch_size / self.training_device_count)))
+            self.queue.append((observations, actions, policies, values,
+                               rewards, game_indices, step_indices, priorities))
 
 
 @ray.remote

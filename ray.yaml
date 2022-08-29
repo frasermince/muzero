@@ -61,7 +61,7 @@ head_setup_commands:
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0 google-api-python-client
   - rm -rf muzero
-  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout distributed-memory && poetry env use 3.9 && poetry install && poetry run pip install envpool
+  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool
 
 # Install Jax and other dependencies on TPU
 worker_setup_commands:
@@ -76,7 +76,7 @@ worker_setup_commands:
   - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0
   - rm -rf muzero
-  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout distributed-memory && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+  - git clone https://github.com/frasermince/muzero.git && cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

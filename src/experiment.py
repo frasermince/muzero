@@ -32,7 +32,7 @@ import ray
 network = MuZeroNet()
 
 
-def get_experiment_class(memory_actor, params_actor):
+def get_experiment_class(memory_actor, params_actor, sample_actor):
 
     class MuzeroExperiment(experiment.AbstractExperiment):
         CHECKPOINT_ATTRS = {
@@ -199,13 +199,8 @@ def get_experiment_class(memory_actor, params_actor):
             if self._train_input is None:
                 self._initialize_train()
 
-            item_count = ray.get(self.memory_actor.item_count.remote())
-            while item_count < self.batch_size:
-                if item_count != self.game_count:
-                    print("GAMES", item_count)
-                    self.game_count = item_count
+            while not ray.get(sample_actor.has_items.remote()):
                 time.sleep(1)
-                item_count = ray.get(self.memory_actor.item_count.remote())
             # file = open('starting_memories.obj', 'wb')
             # pickle.dump(self.memory, file)
             # file.close()
@@ -288,37 +283,7 @@ def get_experiment_class(memory_actor, params_actor):
             device = jax.devices()[0]
             key = self.key
             while True:
-
-                with jax.default_device(cpu):
-                    # import code; code.interact(local=dict(globals(), **locals()))
-                    key, data = ray.get(self.memory_actor.fetch_games.remote(
-                        jax.device_put(key, cpu), self.batch_size))
-                    memories = memory_sample(jax.device_put(
-                        data, device), ray.get(self.memory_actor.get_rollout_size.remote()), ray.get(self.memory_actor.get_n_step.remote()), ray.get(self.memory_actor.get_discount_rate.remote()))
-                    observations = np.reshape(memories["observations"], (self.training_device_count, int(
-                        self.batch_size / self.training_device_count), 32, 96, 96, 3))
-                    actions = np.reshape(memories["actions"], (self.training_device_count, int(
-                        self.batch_size / self.training_device_count), 6, 32))
-                    policies = np.reshape(memories["policies"], (self.training_device_count, int(
-                        self.batch_size / self.training_device_count), 6, 18))
-                    values = np.reshape(memories["values"], (self.training_device_count, int(
-                        self.batch_size / self.training_device_count), 6))
-                    rewards = np.reshape(memories["rewards"], (self.training_device_count, int(
-                        self.batch_size / self.training_device_count), 6))
-                    game_indices = np.array(memories["game_indices"])
-                    step_indices = np.array(memories["step_indices"])
-                    priorities = np.reshape(memories["priority"], (self.training_device_count, int(
-                        self.batch_size / self.training_device_count)))
-                # result = jax.device_put((observations, actions, policies, values, rewards, game_indices, step_indices, priorities), jax.devices()[7])
-                # print("STEP", game_indices, step_indices)
-                # print(observations.shape, actions.shape, policies.shape, values.shape, rewards.shape, game_indices.shape, step_indices.shape, priorities.shape)
-                # print("OBS", observations)
-                # print("ACTIONS",actions)
-                # print("POLICIES", policies)
-                # print("PRIOR", priorities)
-                # print("VALUES", values)
-                # print("REWARDS ALL ZERO", np.all(rewards == 0))
-                yield (observations, actions, policies, values, rewards, game_indices, step_indices, priorities)
+                yield ray.get(sample_actor.pop.remote())
 
             # per_device_batch_size, ragged = divmod(global_batch_size, num_devices)
 
