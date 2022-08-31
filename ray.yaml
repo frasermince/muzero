@@ -9,7 +9,7 @@ cluster_name: muzero
 
 # The maximum number of worker nodes to launch in addition to the head
 # node.
-max_workers: 7
+max_workers: 9
 
 available_node_types:
   ray_head_default:
@@ -25,8 +25,8 @@ available_node_types:
             # See https://cloud.google.com/compute/docs/images for more images
             sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
   ray_tpu:
-    min_workers: 7
-    resources: { "TPU": 1 } # use TPU custom resource in your code
+    min_workers: 9
+    resources: { "TPU": 1, "CPU": 1 } # use TPU custom resource in your code
     node_config:
       # Only v2-8 and v3-8 accelerator types are currently supported.
       # Support for TPU pods will be added in the future.
@@ -64,8 +64,8 @@ head_setup_commands:
   - sudo chown -R $(whoami) /opt/conda/*
   - conda create -y -n "ray" python=3.9
   - conda activate ray && echo 'conda activate ray' >> ~/.bashrc
-  - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
-  - source $HOME/.poetry/env
+  - curl -sSL https://install.python-poetry.org | python3 -
+  # - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0 google-api-python-client
   # - rm -rf muzero
   - cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool
@@ -79,8 +79,8 @@ worker_setup_commands:
   - sudo add-apt-repository -y ppa:deadsnakes/ppa
   - sudo apt install -y python3.9
   - sudo apt install ffmpeg libsm6 libxext6  -y
-  - curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
-  - source $HOME/.poetry/env
+  - curl -sSL https://install.python-poetry.org | python3 -
+  # - source $HOME/.poetry/env
   - pip3 install ray[default]==2.0.0
   # - rm -rf muzero
   - cd muzero && git checkout sample-queue && poetry env use 3.9 && poetry install && poetry run pip install envpool && poetry run pip install "jax[tpu]>=0.2.18" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html

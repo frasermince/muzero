@@ -32,6 +32,7 @@ from ml_collections import config_flags
 import numpy as np
 import ray
 import config
+from utils import confirm_tpus
 
 import tensorflow as tf
 
@@ -74,7 +75,8 @@ def create_checkpointer(
 class TensorBoardLogger:
     """Writer to write experiment data to stdout."""
 
-    def __init__(self, config, mode: str):
+    def __init__(self, config, mode: str, head_node_id):
+        # confirm_tpus(head_node_id)
         """Initializes the writer."""
         log_dir = os.path.join(config.checkpoint_dir, mode)
         # self._writer = tf.summary.create_file_writer(log_dir)
@@ -99,13 +101,13 @@ class TensorBoardLogger:
         self._writer.flush()
 
 
-def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
+def create_writer(config: config_dict.ConfigDict, mode: str, head_node_id: str) -> Any:
     """Creates an object to be used as a writer."""
-    return TensorBoardLogger.remote(config, mode)
+    return TensorBoardLogger.remote(config, mode, head_node_id)
 
 
 @utils.debugger_fallback
-def main(experiment_class, argv, checkpointer_factory=create_checkpointer):
+def main(experiment_class, argv, head_node_id, checkpointer_factory=create_checkpointer):
     """Main potentially under a debugger."""
     del argv  # Unused.
 
@@ -133,9 +135,9 @@ def main(experiment_class, argv, checkpointer_factory=create_checkpointer):
     if jaxline_mode == "train":
         # Run training.
         checkpointer = checkpointer_factory(jax_config, jaxline_mode)
-        writer = create_writer(jax_config, jaxline_mode)
+        writer = create_writer(jax_config, jaxline_mode, head_node_id)
         print("TRAIN", jaxline_train.train)
-        return jaxline_train.train.remote(experiment_class, jax_config, checkpointer, writer)
+        return lambda: jaxline_train.train.remote(experiment_class, jax_config, checkpointer, writer, head_node_id)
     elif jaxline_mode.startswith("eval"):
         # Run evaluation.
         checkpointer = checkpointer_factory(jax_config, jaxline_mode)

@@ -21,6 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import ray
+import time
 import os
 
 
@@ -30,11 +31,20 @@ OptState = Tuple[optax.TraceState,
 Scalars = Mapping[str, jnp.ndarray]
 
 
-def confirm_tpus():
+def confirm_tpus(head_node_id):
+    node_id = ray.get_runtime_context().get_node_id()
+    if node_id != head_node_id:
+        True
+        # jax.distributed.initialize()
     print("***DEVICE COUNT", jax.device_count())
-    if jax.device_count() < 8:
-        print('ERROR: Not enough TPUs available.')
-        os.system('ray stop')
+    # while(True):
+    #     print("***DEVICE COUNT", jax.device_count())
+    #     if jax.device_count() < 8:
+    #         print('ERROR: Not enough TPUs available.')
+    #         time.sleep(2)
+    #     else:
+    #         break
+    #         # os.system('ray stop')
 
 
 NORM_NAMES = ['layer_norm', 'batchnorm']

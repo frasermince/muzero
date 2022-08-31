@@ -48,7 +48,6 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
 
             self.memory_actor = memory_actor
             self.params_actor = params_actor
-            confirm_tpus()
             print("***EXPERIMENT SELF PLAY",
                   jax.device_count(), jax.default_backend())
             self.global_step = 0

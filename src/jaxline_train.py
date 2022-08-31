@@ -29,6 +29,7 @@ import jax
 import jax.numpy as jnp
 from jaxline import utils
 import ray
+from utils import confirm_tpus
 
 FLAGS = flags.FLAGS
 
@@ -70,9 +71,13 @@ def train(
     config,
     checkpointer: utils.Checkpointer,
     writer: Optional[utils.Writer],
+    head_node_id: str,
     periodic_actions=(),
 ):
+    # jax.distributed.initialize()
     """Main training loop."""
+    confirm_tpus(head_node_id)
+    print("TRAINING")
     logging.info("Training with config:\n%s", config)
     is_chief = jax.host_id() == 0
 

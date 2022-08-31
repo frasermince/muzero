@@ -6,6 +6,7 @@ from model import scatter
 from functools import partial
 import ray
 import time
+from utils import confirm_tpus
 
 # TODO Add per game memory for chess and go
 
@@ -108,9 +109,10 @@ class SelfPlayMemory:
         return self.actions.shape[0]
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 class SampleQueue:
-    def __init__(self, key, batch_size, memory_actor):
+    def __init__(self, key, batch_size, memory_actor, head_node_id):
+        # confirm_tpus(head_node_id)
         self.queue = []
         self.training_device_count = 8
         self.key = key
@@ -162,9 +164,10 @@ class SampleQueue:
                                rewards, game_indices, step_indices, priorities))
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 class MuZeroMemory:
-    def __init__(self, length, games=[], priorities=[], rollout_size=5, n_step=10, discount_rate=0.995):
+    def __init__(self, length, games=[], priorities=[], rollout_size=5, n_step=10, discount_rate=0.995, head_node_id=None):
+        # confirm_tpus(head_node_id)
         self.length = length
         self.games = games
         self.priorities = priorities
