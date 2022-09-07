@@ -17,8 +17,7 @@ from ray.util.queue import Queue
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class GlobalParamsActor(object):
-    def __init__(self, params, head_node_id):
-        # confirm_tpus(head_node_id)
+    def __init__(self, params):
         self.params = params
         self.target_params = params
 
@@ -58,28 +57,19 @@ class GlobalParamsActor(object):
 def main(argv):
     ray.init(address='auto')
     print("***RESOURCES", ray.nodes())
-    # initialize_nodes()
-    head_node_id = None
-    for node in ray.nodes():
-        if 'TPU' not in node["Resources"].keys():
-            head_node_id = node["NodeID"]
-            break
-
+    worker_counts = {"self_play": 6, "train": 2, "sample": 4}
     rollout_size = 5
 
-    multiple = 4
-    num_envs = multiple * 16
-    env_batch_size = int(num_envs / 4)
     key = random.PRNGKey(0)
 
     network_key, worker_key = random.split(key)
     memory_actor = MuZeroMemory.remote(
-        400, rollout_size=rollout_size, head_node_id=head_node_id)
+        400, rollout_size=rollout_size)
     network = MuZeroNet()
     network_key, representation_params, dynamics_params, prediction_params = network.initialize_networks_individual(
         network_key)
     params = (representation_params, dynamics_params, prediction_params)
-    params_actor = GlobalParamsActor.remote(params, head_node_id)
+    params_actor = GlobalParamsActor.remote(params)
 
     sample_actor = Queue(10)
     memory_sampler = MemorySampler.remote(sample_actor, memory_actor, 64)
@@ -87,34 +77,75 @@ def main(argv):
         memory_actor, params_actor, sample_actor)
 
     flags.mark_flag_as_required('config')
-    print("WORKERS")
 
-    self_play_workers_count = 6
-    training_worker_count = 2
-    jaxline_workers = [JaxlineWorker.remote()
-                       for _ in range(training_worker_count)]
     workers = []
     print("WORKERS", workers)
     time.sleep(30)
-    self_play_workers = [SelfPlayWorker.remote(i, num_envs, env_batch_size,
-                                               worker_key, params_actor, memory_actor, head_node_id) for i in range(self_play_workers_count)]
+    workers += [self_play_workers.remote(worker_key, params_actor, memory_actor,
+                                         worker_counts["self_play"])]
+    workers += [jaxline_workers.remote(experiment_class,
+                                       worker_counts["train"])]
+    workers += [sample_workers.remote(memory_sampler,
+                                      worker_counts["sample"], key)]
     workers_to_run = []
-    for worker in self_play_workers:
-        if ray.get(worker.has_tpus.remote()):
-            workers_to_run.append(worker)
+    # for worker in self_play_workers:
+    #     if ray.get(worker.has_tpus.remote()):
+    #         workers_to_run.append(worker)
 
-    workers += [self_play_worker.play.remote()
-                for self_play_worker in workers_to_run]
-    for _ in range(4):
-        key, sample_key = random.split(key)
-        workers += [memory_sampler.run_queue.remote(
-            key)]
-    workers += [jaxline_worker.run.remote(
-        experiment_class) for jaxline_worker in jaxline_workers]
-
-    print(workers)
     ray.get(workers)
     print("AFTER WAIT")
+
+
+@ray.remote
+def sample_workers(memory_sampler, worker_count, key):
+    workers = []
+    i = 0
+    while i < 10:
+        workers = []
+        for _ in range(worker_count):
+            key, sample_key = random.split(key)
+            workers += [memory_sampler.run_queue.remote(
+                sample_key)]
+        i += 1
+        try:
+            ray.wait(workers)
+        except ray.exceptions.WorkerCrashedError:
+            print('SAMPLE FAILURE ', i)
+
+
+@ray.remote
+def jaxline_workers(experiment_class, worker_count):
+    jaxline_workers = [JaxlineWorker.remote()
+                       for _ in range(worker_count)]
+
+    i = 0
+    while i < 10:
+        workers = [jaxline_worker.run.remote(
+            experiment_class) for jaxline_worker in jaxline_workers]
+        i += 1
+        try:
+            ray.wait(workers)
+        except ray.exceptions.WorkerCrashedError:
+            print('TRAIN FAILURE ', i)
+
+
+@ray.remote
+def self_play_workers(worker_key, params_actor, memory_actor, worker_count):
+    multiple = 4
+    num_envs = multiple * 16
+    env_batch_size = int(num_envs / 4)
+    self_play_workers = [SelfPlayWorker.remote(i, num_envs, env_batch_size,
+                                               worker_key, params_actor, memory_actor) for i in range(worker_count)]
+
+    i = 0
+    while i < 10:
+        workers = [self_play_worker.play.remote()
+                   for self_play_worker in self_play_workers]
+        i += 1
+        try:
+            ray.wait(workers)
+        except ray.exceptions.WorkerCrashedError:
+            print('SELF PLAY FAILURE ', i)
 
 
 # @ray.remote(resources={"TPU": 1})
@@ -153,6 +184,5 @@ def main(argv):
 #         flags.mark_flag_as_required('config')
 #         platform.main(experiment_class, argv)
 #     app.run(lambda argv: app_run(argv))
-
 
 app.run(lambda argv: main(argv))

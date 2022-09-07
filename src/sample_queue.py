@@ -17,6 +17,7 @@ class MemorySampler:
         self.rollout_size = rollout_size
         self.n_step = n_step
         self.discount_rate = discount_rate
+        self.memory_batches = 8
 
     async def run_queue(self, key):
         training_device_count = 8
@@ -82,23 +83,43 @@ class MemorySampler:
         policies = []
         priorities = []
         rewards = []
-        for i in game_indices[0: self.batch_size]:
-            game = await self.memory_actor.get_game.remote(i)
-            priorities.append(game.priorities)
-            observations.append(game.observations)
-            actions.append(game.actions)
-            values.append(game.values)
-            policies.append(game.policies)
-            rewards.append(game.rewards)
 
-        priorities = np.array(priorities)
+        full_priorities = []
+        full_observations = []
+        full_actions = []
+        full_values = []
+        full_policies = []
+        full_rewards = []
+        for i in range(self.memory_batches):
+            split_start = len(game_indices / self.memory_batches) * i
+            split_end = len(game_indices / self.memory_batches) * \
+                i + self.memory_batches
+            (priorities, observations, actions, values, policies, rewards) = await self.memory_actor.get_games.remote(game_indices[split_start: split_end], i)
+            full_priorities += priorities
+            full_observations += observations
+            full_actions += actions
+            full_values += values
+            full_policies += policies
+            full_rewards += rewards
+
+        # for i in game_indices:
+        #     # TODO deal with reset memory here
+        #     game = await self.memory_actor.get_games.remote(i)
+        #     priorities.append(game.priorities)
+        #     observations.append(game.observations)
+        #     actions.append(game.actions)
+        #     values.append(game.values)
+        #     policies.append(game.policies)
+        #     rewards.append(game.rewards)
+
+        priorities = np.array(full_priorities)
         choices, priorities = jax.vmap(self.choice, (0, 0))(
             priorities, keys[0: self.batch_size])
-        observations = np.stack(observations)
-        actions = np.stack(actions)
-        values = np.stack(values)
-        policies = np.stack(policies)
-        rewards = np.stack(rewards)
+        observations = np.stack(full_observations)
+        actions = np.stack(full_actions)
+        values = np.stack(full_values)
+        policies = np.stack(full_policies)
+        rewards = np.stack(full_rewards)
 
         return key, (observations, actions, values, policies, rewards, np.array(priorities), game_indices, np.array(choices)), keys
 

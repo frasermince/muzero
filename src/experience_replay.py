@@ -109,8 +109,7 @@ class SelfPlayMemory:
 
 @ray.remote(num_cpus=1, max_restarts=-1, max_task_retries=-1)
 class MuZeroMemory:
-    def __init__(self, length, games=[], priorities=[], rollout_size=5, n_step=10, discount_rate=0.995, head_node_id=None):
-        # confirm_tpus(head_node_id)
+    def __init__(self, length, games=[], priorities=[], rollout_size=5, n_step=10, discount_rate=0.995):
         self.length = length
         self.games = games
         self.priorities = priorities
@@ -126,6 +125,25 @@ class MuZeroMemory:
 
     def get_discount_rate(self):
         return self.discount_rate
+
+    def get_games(self, game_indices):
+        observations = []
+        actions = []
+        values = []
+        policies = []
+        priorities = []
+        rewards = []
+
+        for i in game_indices:
+            # TODO deal with reset memory here
+            priorities.append(self.games[i].priorities)
+            observations.append(self.games[i].observations)
+            actions.append(self.games[i].actions)
+            values.append(self.games[i].values)
+            policies.append(self.games[i].policies)
+            rewards.append(self.games[i].rewards)
+
+        return (priorities, observations, actions, values, policies, rewards)
 
     def get_game(self, i):
         return self.games[i]

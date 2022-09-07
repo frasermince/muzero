@@ -33,6 +33,9 @@ import numpy as np
 import ray
 import config
 from utils import confirm_tpus
+from jax.tree_util import register_pytree_node
+from experience_replay import MuZeroMemory, SelfPlayMemory, GameMemory
+import experience_replay
 
 import tensorflow as tf
 
@@ -108,6 +111,24 @@ def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
 
 @ray.remote(resources={"TPU": 1}, max_restarts=-1, max_task_retries=-1)
 class JaxlineWorker:
+    def __init__(self) -> None:
+        register_pytree_node(
+            GameMemory,
+            experience_replay.game_memory_flatten,
+            experience_replay.game_memory_unflatten
+        )
+
+        register_pytree_node(
+            SelfPlayMemory,
+            experience_replay.self_play_flatten,
+            experience_replay.self_play_unflatten
+        )
+        register_pytree_node(
+            MuZeroMemory,
+            experience_replay.muzero_flatten,
+            experience_replay.muzero_unflatten
+        )
+
     def run(self, experiment_class):
         """Main potentially under a debugger."""
         # Make sure the required fields are available in the config.

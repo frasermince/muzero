@@ -327,14 +327,13 @@ def play_game(key, params, self_play_memories, env, steps, rewards, halting_step
 
 @ray.remote(resources={"TPU": 1}, max_restarts=-1, max_task_retries=-1)
 class SelfPlayWorker(object):
-    def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory, head_node_id):
+    def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory):
         register_pytree_node(
             SelfPlayMemory,
             experience_replay.self_play_flatten,
             experience_replay.self_play_unflatten
         )
         self.worker_id = worker_id
-        confirm_tpus(head_node_id)
         self.env = envpool.make("Pong-v5", env_type="gym", num_envs=num_envs,
                                 batch_size=env_batch_size, img_height=96, img_width=96, gray_scale=False, stack_num=1)
         self.initial_observation = self.env.reset()
@@ -395,8 +394,9 @@ class SelfPlayWorker(object):
         else:
             temperature = 0.25
         while True:
-            params = ray.get(self.params_actor.get_target_params.remote())
-            params = jax.device_put(params, jax.devices()[0])
+            if self.play_step % 50 == 0:
+                params = ray.get(self.params_actor.get_target_params.remote())
+                params = jax.device_put(params, jax.devices()[0])
             (self.key, _, self.env, self.game_buffer, self.steps, self.rewards, _, self.positive_rewards, self.negative_rewards) = play_step(
                 self.play_step, (self.key, params, self.env, self.game_buffer, self.steps, self.rewards, temperature, self.positive_rewards, self.negative_rewards))
             self.play_step += 1

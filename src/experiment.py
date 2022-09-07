@@ -15,11 +15,10 @@ import functools
 import gym
 import gym.wrappers as wrappers
 from jax import random
-from experience_replay import MuZeroMemory, SelfPlayMemory, GameMemory, Memory
+from experience_replay import Memory
 from self_play import play_game, SelfPlayWorker
 from chex import assert_axis_dimension, assert_shape
 import envpool
-from jax.tree_util import register_pytree_node
 import pickle
 import jax.lax as lax
 import ray
@@ -82,22 +81,6 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             env_batch_size = int(self.num_envs / 4)
             self.key, worker_key = random.split(self.key)
 
-            register_pytree_node(
-                GameMemory,
-                experience_replay.game_memory_flatten,
-                experience_replay.game_memory_unflatten
-            )
-
-            register_pytree_node(
-                SelfPlayMemory,
-                experience_replay.self_play_flatten,
-                experience_replay.self_play_unflatten
-            )
-            register_pytree_node(
-                MuZeroMemory,
-                experience_replay.muzero_flatten,
-                experience_replay.muzero_unflatten
-            )
             cpu = jax.devices("cpu")[0]
             # with jax.default_device(cpu):
             #   filehandler = open("./starting_memories.obj", 'rb')
@@ -206,7 +189,8 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             # pickle.dump(self.memory, file)
             # file.close()
 
-            inputs = sample_actor.get(block=True)
+            # inputs = sample_actor.get(block=True)
+            inputs = next(self._train_input)
             if global_step % 10 == 0:
                 print("TRAIN STEP", global_step)
 
@@ -241,7 +225,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
 
         def _initialize_train(self):
             print("INIT")
-            # self._train_input = jl_utils.py_prefetch(self._build_train_input)
+            self._train_input = jl_utils.py_prefetch(self._build_train_input)
             print("AFTER TRAIN INIT")
 
             total_batch_size = self.config.training.batch_size
@@ -283,7 +267,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             """See base class."""
             # num_devices = jax.device_count()
             while True:
-                yield ray.get(sample_actor.pop.remote())
+                yield sample_actor.get(block=True)
 
             # per_device_batch_size, ragged = divmod(global_batch_size, num_devices)
 
