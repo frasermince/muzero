@@ -199,6 +199,14 @@ python-versions = ">=3.6"
 colorama = {version = "*", markers = "platform_system == \"Windows\""}
 
 [[package]]
+name = "cloud-tpu-profiler"
+version = "2.4.0"
+description = "Trace and profile Cloud TPU performance"
+category = "main"
+optional = false
+python-versions = "*"
+
+[[package]]
 name = "cloudpickle"
 version = "2.1.0"
 description = "Extended pickling support for Python objects"
@@ -1827,7 +1835,7 @@ testing = ["func-timeout", "jaraco.itertools", "pytest (>=6)", "pytest-black (>=
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.9, <3.11"
-content-hash = "9ef66ddc99fcc9a92700ba60548243d9ded31feefb15679d9d17631d49c62919"
+content-hash = "3adbe173edf9dd2afb7cb42adeea9d9c982e029690f99786a9123508dd9fa437"
 
 [metadata.files]
 absl-py = [
@@ -1981,6 +1989,9 @@ chex = [
 click = [
     {file = "click-8.0.4-py3-none-any.whl", hash = "sha256:6a7a62563bbfabfda3a38f3023a1db4a35978c0abd76f6c9605ecd6554d6d9b1"},
     {file = "click-8.0.4.tar.gz", hash = "sha256:8458d7b1287c5fb128c90e23381cf99dcde74beaf6c7ff6384ce84d6fe090adb"},
+]
+cloud-tpu-profiler = [
+    {file = "cloud_tpu_profiler-2.4.0-py3-none-any.whl", hash = "sha256:c59f31190bcf854d00be10755cf7b0b963ca9a7f52964857eba9009afd3af9c5"},
 ]
 cloudpickle = [
     {file = "cloudpickle-2.1.0-py3-none-any.whl", hash = "sha256:b5c434f75c34624eedad3a14f2be5ac3b5384774d5b0e3caf905c21479e6c4b1"},

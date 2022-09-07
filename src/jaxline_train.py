@@ -27,9 +27,9 @@ from absl import flags
 from absl import logging
 import jax
 import jax.numpy as jnp
-from jaxline import utils
 import ray
 from utils import confirm_tpus
+from jaxline import utils
 
 FLAGS = flags.FLAGS
 
@@ -64,20 +64,17 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
     return experiment
 
 
-@utils.disable_pmap_jit
-@ray.remote(resources={"TPU": 1})
 def train(
     experiment_class,
     config,
-    checkpointer: utils.Checkpointer,
-    writer: Optional[utils.Writer],
-    head_node_id: str,
+    writer,
     periodic_actions=(),
 ):
     # jax.distributed.initialize()
     """Main training loop."""
-    confirm_tpus(head_node_id)
-    print("TRAINING")
+    # confirm_tpus(head_node_id)
+    print("TRAINING FUNC")
+    checkpointer = utils.InMemoryCheckpointer(config, mode="train")
     logging.info("Training with config:\n%s", config)
     is_chief = jax.host_id() == 0
 

@@ -30,6 +30,7 @@ ml-collections = "^0.1.1"
 ray = "^2.0.0"
 fabric = "^2.7.1"
 google-api-python-client = "^2.58.0"
+cloud-tpu-profiler = ">=2.3.0"
 
 [tool.poetry.dev-dependencies]
 

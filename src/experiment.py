@@ -15,7 +15,7 @@ import functools
 import gym
 import gym.wrappers as wrappers
 from jax import random
-from experience_replay import MuZeroMemory, SelfPlayMemory, GameMemory, Memory, memory_sample
+from experience_replay import MuZeroMemory, SelfPlayMemory, GameMemory, Memory
 from self_play import play_game, SelfPlayWorker
 from chex import assert_axis_dimension, assert_shape
 import envpool
@@ -87,6 +87,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                 experience_replay.game_memory_flatten,
                 experience_replay.game_memory_unflatten
             )
+
             register_pytree_node(
                 SelfPlayMemory,
                 experience_replay.self_play_flatten,
@@ -113,7 +114,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             # self.env.async_reset()
 
             self._update_func = jax.pmap(self._update_func, axis_name='i',
-                                         donate_argnums=(1), in_axes=(None, None, (0, 0, 0, 0, 0, 0), None, None), out_axes=(None, None, 0, 0), devices=jax.devices()[4: 8])
+                                         donate_argnums=(1), in_axes=(None, None, (0, 0, 0, 0, 0, 0), None, None), out_axes=(None, None, 0, 0))
 
             self.entropy_scaling = 0.01
             self.automatic_optimization = False
@@ -154,6 +155,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                     step_rng, host_id, axis_name="i", mode=config.random_mode_train)
                 return global_step, (step_rng, state_rng)
 
+            print("TRAINING LOOP")
             global_step_devices = np.broadcast_to(state.global_step,
                                                   [jax.local_device_count()])
             host_id_devices = jl_utils.host_id_devices_for_rng(
@@ -171,6 +173,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                 while True:
                     with jax.profiler.StepTraceAnnotation(
                             "train", step_num=state.global_step):
+                        print("LOOP ITERATION")
                         scalar_outputs = self.step(
                             global_step=state.global_step, rng=step_key, writer=writer)
 
@@ -199,14 +202,13 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
 
             if self._train_input is None:
                 self._initialize_train()
-
-            while not ray.get(sample_actor.has_items.remote()):
-                time.sleep(1)
             # file = open('starting_memories.obj', 'wb')
             # pickle.dump(self.memory, file)
             # file.close()
 
-            inputs = next(self._train_input)
+            inputs = sample_actor.get(block=True)
+            if global_step % 10 == 0:
+                print("TRAIN STEP", global_step)
 
             (observations, actions, policies, values, rewards,
              game_indices, step_indices, priorities) = inputs
@@ -238,7 +240,9 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             return scalars
 
         def _initialize_train(self):
-            self._train_input = jl_utils.py_prefetch(self._build_train_input)
+            print("INIT")
+            # self._train_input = jl_utils.py_prefetch(self._build_train_input)
+            print("AFTER TRAIN INIT")
 
             total_batch_size = self.config.training.batch_size
             # steps_per_epoch = (
@@ -278,11 +282,6 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
         def _build_train_input(self):
             """See base class."""
             # num_devices = jax.device_count()
-            # global_batch_size = self.config.training.batch_size
-            cpu = jax.devices("cpu")[0]
-            # key = jax.device_put(self.key, cpu)
-            device = jax.devices()[0]
-            key = self.key
             while True:
                 yield ray.get(sample_actor.pop.remote())
 

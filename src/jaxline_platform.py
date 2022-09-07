@@ -71,23 +71,23 @@ def create_checkpointer(
     return utils.InMemoryCheckpointer(config, mode)
 
 
-@ray.remote
+@ray.remote(max_restarts=-1, max_task_retries=-1)
 class TensorBoardLogger:
     """Writer to write experiment data to stdout."""
 
-    def __init__(self, config, mode: str, head_node_id):
+    def __init__(self, config, mode: str):
         # confirm_tpus(head_node_id)
         """Initializes the writer."""
         log_dir = os.path.join(config.checkpoint_dir, mode)
-        # self._writer = tf.summary.create_file_writer(log_dir)
+        self._writer = tf.summary.create_file_writer(log_dir)
 
     def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
         """Writes scalars to stdout."""
         global_step = int(global_step)
-        # with self._writer.as_default():
-        #     for k, v in scalars.items():
-        #         tf.summary.scalar(k, v, step=global_step)
-        # self._writer.flush()
+        with self._writer.as_default():
+            for k, v in scalars.items():
+                tf.summary.scalar(k, v, step=global_step)
+        self._writer.flush()
 
     def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
         """Writes images to writers that support it."""
@@ -97,67 +97,37 @@ class TensorBoardLogger:
                 # Tensorboard only accepts [B, H, W, C] but we support [H, W] also.
                 if v.ndim == 2:
                     v = v[None, ..., None]
-                # tf.summary.image(k, v, step=global_step)
+                tf.summary.image(k, v, step=global_step)
         self._writer.flush()
 
 
-def create_writer(config: config_dict.ConfigDict, mode: str, head_node_id: str) -> Any:
+def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
     """Creates an object to be used as a writer."""
-    return TensorBoardLogger.remote(config, mode, head_node_id)
+    return TensorBoardLogger.remote(config, mode)
 
 
-@utils.debugger_fallback
-def main(experiment_class, argv, head_node_id, checkpointer_factory=create_checkpointer):
-    """Main potentially under a debugger."""
-    del argv  # Unused.
-
-    # Make sure the required fields are available in the config.
-    jax_config = config.get_config()
-    base_config.validate_config(jax_config)
-
-    if _JAXLINE_TPU_DRIVER.value:
-        jax.config.update("jax_xla_backend", "tpu_driver")
-        jax.config.update("jax_backend_target", _JAXLINE_TPU_DRIVER.value)
-        logging.info("Backend: %s %r",
-                     _JAXLINE_TPU_DRIVER.value, jax.devices())
-
-    if _JAXLINE_ENSURE_TPU.value:
-        # JAX currently falls back to CPU if it cannot register the TPU platform.
-        # In multi-host setups this can happen if we timeout waiting for hosts to
-        # come back up at startup or after pre-emption. This test will crash the
-        # task if TPU devices are not available. We have increased the number of
-        # acceptable failures per-task to allow for this.
-        # TODO(tomhennigan) This test will eventually be part of JAX itself.
+@ray.remote(resources={"TPU": 1}, max_restarts=-1, max_task_retries=-1)
+class JaxlineWorker:
+    def run(self, experiment_class):
+        """Main potentially under a debugger."""
+        # Make sure the required fields are available in the config.
         chex.assert_tpu_available()
 
-    jaxline_mode = _JAXLINE_MODE.value
-    print("CONFIG", jax_config)
-    if jaxline_mode == "train":
-        # Run training.
-        checkpointer = checkpointer_factory(jax_config, jaxline_mode)
-        writer = create_writer(jax_config, jaxline_mode, head_node_id)
-        print("TRAIN", jaxline_train.train)
-        return lambda: jaxline_train.train.remote(experiment_class, jax_config, checkpointer, writer, head_node_id)
-    elif jaxline_mode.startswith("eval"):
-        # Run evaluation.
-        checkpointer = checkpointer_factory(jax_config, jaxline_mode)
-        writer = create_writer(jax_config, jaxline_mode)
-        return jaxline_train.evaluate.remote(experiment_class, jax_config, checkpointer, writer,
-                                             jaxline_mode)
-    elif jaxline_mode == "train_eval_multithreaded":
-        pool = futures.ThreadPoolExecutor(1)
+        jax_config = config.get_config()
+        base_config.validate_config(jax_config)
 
-        # Run training in a background thread!
-        pool.submit(jaxline_train.train, experiment_class, jax_config,
-                    checkpointer_factory(jax_config, "train"),
-                    create_writer(jax_config, "train"))
-
-        # Run eval!
-        jaxline_train.evaluate(experiment_class, jax_config,
-                               checkpointer_factory(jax_config, "eval"),
-                               create_writer(jax_config, "eval"))
-
-        # If we're here, eval has finished. Wait for train to finish!
-        pool.shutdown()
-    else:
-        raise ValueError(f"Mode {jaxline_mode} not recognized.")
+        jaxline_mode = "train"
+        print("CONFIG", jax_config)
+        if jaxline_mode == "train":
+            # Run training.
+            writer = create_writer(jax_config, jaxline_mode)
+            print("TRAIN", jaxline_train.train)
+            jaxline_train.train(experiment_class, jax_config, writer)
+        elif jaxline_mode.startswith("eval"):
+            # Run evaluation.
+            checkpointer = checkpointer_factory(jax_config, jaxline_mode)
+            writer = create_writer(jax_config, jaxline_mode)
+            jaxline_train.evaluate(experiment_class, jax_config, checkpointer, writer,
+                                   jaxline_mode)
+        else:
+            raise ValueError(f"Mode {jaxline_mode} not recognized.")

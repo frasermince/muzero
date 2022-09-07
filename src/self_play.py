@@ -16,6 +16,7 @@ from experience_replay import SelfPlayMemory
 import ray
 from jax.tree_util import register_pytree_node
 import os
+import chex
 from utils import confirm_tpus
 
 # config.update('jax_disable_jit', True)
@@ -324,7 +325,7 @@ def play_game(key, params, self_play_memories, env, steps, rewards, halting_step
     # return key, self_play_memories, steps, rewards, steps_ready, positive_rewards, negative_rewards
 
 
-@ray.remote(resources={"TPU": 1}, max_restarts=5)
+@ray.remote(resources={"TPU": 1}, max_restarts=-1, max_task_retries=-1)
 class SelfPlayWorker(object):
     def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory, head_node_id):
         register_pytree_node(
@@ -352,9 +353,9 @@ class SelfPlayWorker(object):
         self.memory = memory
 
         # with jax.default_device(jax.devices()[0]):
-        self.starting_memories = SelfPlayMemory(
+        self.game_buffer = SelfPlayMemory(
             num_envs, self.halting_steps)
-        self.starting_memories.populate()
+        self.game_buffer.populate()
 
         # with jax.default_device(jax.devices()[0]):
         self.initial_observation = self.env.reset()
@@ -362,15 +363,17 @@ class SelfPlayWorker(object):
             jnp.array(self.initial_observation), (0, 2, 3, 1))
         starting_policy = jnp.ones(18) / 18
         for i in range(32):
-            self.starting_memories.observations = self.starting_memories.observations.at[:, i].set(
+            self.game_buffer.observations = self.game_buffer.observations.at[:, i].set(
                 self.initial_observation[0])
-            self.starting_memories.policies = self.starting_memories.policies.at[:, i].set(
+            self.game_buffer.policies = self.game_buffer.policies.at[:, i].set(
                 starting_policy)
             # self.starting_memories.append((self.initial_observation[0], 0, starting_policy, jnp.broadcast_to(jnp.array(1.0), (1)), 0))
 
         self.steps = jnp.zeros(
-            self.starting_memories.games, dtype=jnp.int32) + 32
-        self.game_buffer = self.starting_memories
+            self.game_buffer.games, dtype=jnp.int32) + 32
+
+    def has_tpus(self):
+        return jax.device_count() >= 8
 
     def save_memories(self):
         cpu = jax.devices("cpu")[0]
@@ -383,9 +386,8 @@ class SelfPlayWorker(object):
             self.memory.append.remote(finished_game_buffer)
 
     def play(self):
+        chex.assert_tpu_available()
         print("***PLAY")
-        if self.game_buffer == None:
-            self.game_buffer = self.starting_memories
         if self.play_step < 500000:
             temperature = 1
         elif self.play_step < 750000:
