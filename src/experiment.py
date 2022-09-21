@@ -138,7 +138,6 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                     step_rng, host_id, axis_name="i", mode=config.random_mode_train)
                 return global_step, (step_rng, state_rng)
 
-            print("TRAINING LOOP")
             global_step_devices = np.broadcast_to(state.global_step,
                                                   [jax.local_device_count()])
             host_id_devices = jl_utils.host_id_devices_for_rng(
@@ -156,7 +155,6 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                 while True:
                     with jax.profiler.StepTraceAnnotation(
                             "train", step_num=state.global_step):
-                        print("LOOP ITERATION")
                         scalar_outputs = self.step(
                             global_step=state.global_step, rng=step_key, writer=writer)
 
@@ -191,8 +189,9 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
 
             # inputs = sample_actor.get(block=True)
             inputs = next(self._train_input)
-            if global_step % 10 == 0:
-                print("TRAIN STEP", global_step)
+            while inputs == None:
+                time.sleep(60)
+                inputs = next(self._train_input)
 
             (observations, actions, policies, values, rewards,
              game_indices, step_indices, priorities) = inputs
@@ -215,18 +214,18 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                 for i in range(value_difference.shape[0]):
                     self.memory_actor.update_priorities.remote(
                         value_difference[i, -1], game_indices[i], step_indices[i])
-            if global_step % self.target_update_rate == 0:
-                print("PRIORITIES", value_difference)
-                print("GAMES", ray.get(self.memory_actor.item_count.remote()))
-                self.params_actor.sync_target_params.remote()
 
             scalars = jl_utils.get_first(scalars)
+            if global_step % 10 == 0:
+                print("LOSS", scalars["train_loss"])
+                print("STEP", global_step)
+            if global_step % self.target_update_rate == 0:
+                print("GLOBAL STEP", global_step, scalars)
+
             return scalars
 
         def _initialize_train(self):
-            print("INIT")
             self._train_input = jl_utils.py_prefetch(self._build_train_input)
-            print("AFTER TRAIN INIT")
 
             total_batch_size = self.config.training.batch_size
             # steps_per_epoch = (
@@ -266,8 +265,11 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
         def _build_train_input(self):
             """See base class."""
             # num_devices = jax.device_count()
+            device = jax.devices()[0]
             while True:
-                yield sample_actor.get(block=True)
+                result = sample_actor.get(block=True)
+                jax.device_put(result, device)
+                yield result
 
             # per_device_batch_size, ragged = divmod(global_batch_size, num_devices)
 
@@ -325,30 +327,6 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                 (hidden_state, current_value_loss, current_policy_loss, current_reward_loss,
                  support_value, search_policy, support_reward, actions, params, values, new_key)
             )
-            # for i in range(self.rollout_size):
-
-            #   value, policy, reward, hidden_state, self.key = self.network.forward_hidden_state(self.key, params, actions[:, i, :].astype(float), hidden_state)
-            #   # hidden_state.register_hook(lambda grad: grad * 0.5)
-            #   values.append(value)
-            #   policies.append(policy)
-            #   rewards.append(reward)
-            # for i in range(len(values)):
-            #   current_policy_loss = optax.softmax_cross_entropy(policies[i], search_policy.transpose(1, 0, 2)[i, :, :])
-            #   current_value_loss = optax.softmax_cross_entropy(values[i].squeeze(), support_value[:, i, :])
-            #   current_reward_loss = optax.softmax_cross_entropy(rewards[i], support_reward[:, i, :])
-            #   # current_value_loss.register_hook(
-            #   #   lambda grad: grad / self.rollout_size
-            #   # )
-            #   # current_reward_loss.register_hook(
-            #   #   lambda grad: grad / self.rollout_size
-            #   # )
-            #   # current_policy_loss.register_hook(
-            #   #   lambda grad: grad / self.rollout_size
-            #   # )
-
-            #   value_loss += current_value_loss
-            #   reward_loss += current_reward_loss
-            #   policy_loss += current_policy_loss
 
             loss = policy_loss + value_loss + reward_loss
 

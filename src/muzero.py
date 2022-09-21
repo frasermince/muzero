@@ -18,6 +18,7 @@ from ray.util.queue import Queue
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class GlobalParamsActor(object):
     def __init__(self, params):
+        self.counter = 0
         self.params = params
         self.target_params = params
 
@@ -32,39 +33,24 @@ class GlobalParamsActor(object):
 
     def set_params(self, params):
         self.params = params
-
-
-# @ray.remote(resources={"TPU": 1})
-# class InitializeNode:
-#     def initialize_custer(self):
-#         print("REMOTE")
-#         jax.distributed.initialize()
-
-
-# def initialize_nodes():
-#     num_nodes = len(ray.nodes()) - 2
-#     bundles = [{"TPU": 1, "CPU": 1} for _ in range(num_nodes)]
-#     pg = ray.util.placement_group(
-#         bundles=bundles, strategy="STRICT_SPREAD")
-#     ray.get(pg.ready())
-#     executors = [InitializeNode.options(
-#         placement_group=pg).remote() for n in range(num_nodes)]
-#     ray.get([executor.initialize_custer.remote() for executor in executors])
-#     ray.util.remove_placement_group(pg)
+        self.counter += 1
+        if self.counter % 100 == 0:
+            print("SYNCING TARGET PARAMS", self.counter)
+            self.sync_target_params()
 
 
 # TODO confirm that target_params and params are being used in the right spot
 def main(argv):
-    ray.init(address='auto')
+    ray.init(address='auto', include_dashboard=True)
     print("***RESOURCES", ray.nodes())
-    worker_counts = {"self_play": 6, "train": 2, "sample": 4}
+    worker_counts = {"self_play": 4, "train": 4, "sample": 3}
     rollout_size = 5
 
     key = random.PRNGKey(0)
 
     network_key, worker_key = random.split(key)
-    memory_actor = MuZeroMemory.remote(
-        400, rollout_size=rollout_size)
+    memory_actor = MuZeroMemory.options(max_concurrency=16).remote(
+        5000, rollout_size=rollout_size)
     network = MuZeroNet()
     network_key, representation_params, dynamics_params, prediction_params = network.initialize_networks_individual(
         network_key)
@@ -93,6 +79,7 @@ def main(argv):
     #         workers_to_run.append(worker)
 
     ray.get(workers)
+    ray.shutdown()
     print("AFTER WAIT")
 
 
@@ -136,53 +123,20 @@ def self_play_workers(worker_key, params_actor, memory_actor, worker_count):
     env_batch_size = int(num_envs / 4)
     self_play_workers = [SelfPlayWorker.remote(i, num_envs, env_batch_size,
                                                worker_key, params_actor, memory_actor) for i in range(worker_count)]
+    workers_to_run = []
+    for worker in self_play_workers:
+        if ray.get(worker.has_tpus.remote()):
+            workers_to_run.append(worker)
 
     i = 0
     while i < 10:
         workers = [self_play_worker.play.remote()
-                   for self_play_worker in self_play_workers]
+                   for self_play_worker in workers_to_run]
         i += 1
         try:
             ray.wait(workers)
         except ray.exceptions.WorkerCrashedError:
             print('SELF PLAY FAILURE ', i)
 
-
-# @ray.remote(resources={"TPU": 1})
-# def run_jaxline(experiment_class):
-#     _NODE_IP = flags.DEFINE_string(
-#         name="node-ip-address",
-#         default="",
-#         help="ray node ip",
-#     )
-#     _NODE_PORT = flags.DEFINE_string(
-#         name="node-manager-port",
-#         default="",
-#         help="ray node ip",
-#     )
-
-#     _OBJECT_STORE = flags.DEFINE_string(
-#         name="object-store-name",
-#         default="",
-#         help="ray node ip",
-#     )
-
-#     _RAYLET_NAME = flags.DEFINE_string(
-#         name="raylet-name",
-#         default="",
-#         help="ray node ip",
-#     )
-
-#     _REDIS_ADDRESS = flags.DEFINE_string(
-#         name="redis-address",
-#         default="",
-#         help="ray node ip",
-#     )
-
-#     def app_run(argv):
-#         print("ARGV", argv)
-#         flags.mark_flag_as_required('config')
-#         platform.main(experiment_class, argv)
-#     app.run(lambda argv: app_run(argv))
 
 app.run(lambda argv: main(argv))

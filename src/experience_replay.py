@@ -5,6 +5,7 @@ import jax
 from model import scatter
 import ray
 from utils import confirm_tpus
+from jax.tree_util import register_pytree_node
 
 # TODO Add per game memory for chess and go
 
@@ -73,7 +74,7 @@ class SelfPlayMemory:
         self.policies = policies
 
     @jax.jit
-    def output_game_buffer(self, finished_steps, all_steps, starting_observations, amount_to_add=8):
+    def output_game_buffer(self, finished_steps, all_steps, starting_observations, amount_to_add=4):
         if amount_to_add:
             finished_steps = finished_steps[0: amount_to_add]
         finished_buffer = SelfPlayMemory(self.games, self.halting_steps)
@@ -95,7 +96,7 @@ class SelfPlayMemory:
         self.values = self.observations.at[finished_steps].set(0)
         self.policies = self.policies.at[finished_steps].set(0)
 
-        for i in range(8):
+        for i in range(amount_to_add):
             all_steps = self.set_steps(i, (all_steps, finished_steps))
 
         return finished_buffer, all_steps
@@ -107,7 +108,7 @@ class SelfPlayMemory:
         return self.actions.shape[0]
 
 
-@ray.remote(num_cpus=1, max_restarts=-1, max_task_retries=-1)
+@ray.remote(resources={"TPU": 1}, num_cpus=1, max_restarts=-1, max_task_retries=-1)
 class MuZeroMemory:
     def __init__(self, length, games=[], priorities=[], rollout_size=5, n_step=10, discount_rate=0.995):
         self.length = length
@@ -116,6 +117,22 @@ class MuZeroMemory:
         self.rollout_size = rollout_size
         self.n_step = n_step
         self.discount_rate = discount_rate
+        register_pytree_node(
+            GameMemory,
+            game_memory_flatten,
+            game_memory_unflatten
+        )
+
+        register_pytree_node(
+            SelfPlayMemory,
+            self_play_flatten,
+            self_play_unflatten
+        )
+        register_pytree_node(
+            MuZeroMemory,
+            muzero_flatten,
+            muzero_unflatten
+        )
 
     def get_rollout_size(self):
         return self.rollout_size
@@ -136,32 +153,36 @@ class MuZeroMemory:
 
         for i in game_indices:
             # TODO deal with reset memory here
+            # print("FETCH GAME", i, len(self.games))
             priorities.append(self.games[i].priorities)
             observations.append(self.games[i].observations)
             actions.append(self.games[i].actions)
             values.append(self.games[i].values)
             policies.append(self.games[i].policies)
             rewards.append(self.games[i].rewards)
-
         return (priorities, observations, actions, values, policies, rewards)
 
     def get_game(self, i):
         return self.games[i]
 
-    def get_priorities(self, start, end):
-        return self.priorities[start:end]
+    def get_priorities(self):
+        # print("PRIOR", self.priorities)
+        return self.priorities
 
     def append(self, self_play_memory):
         print("BEFORE APPEND", len(self.games))
-        for i in range(len(self_play_memory)):
-            game_memory = GameMemory(
-                rollout_size=self.rollout_size, n_step=self.n_step, discount_rate=self.discount_rate)
-            game_memory.add_from_self_play(self_play_memory[i])
-            self.games.append(game_memory)
-            self.priorities.append(np.max(self.games[-1].priorities))
-            if len(self.games) > self.length:
-                self.games.pop(0)
-                self.priorities.pop(0)
+        cpu = jax.devices("cpu")[0]
+        self_play_memory = jax.device_put(self_play_memory, cpu)
+        with jax.default_device(cpu):
+            for i in range(len(self_play_memory)):
+                game_memory = GameMemory(
+                    rollout_size=self.rollout_size, n_step=self.n_step, discount_rate=self.discount_rate)
+                game_memory.add_from_self_play(self_play_memory[i])
+                self.games.append(game_memory)
+                self.priorities.append(np.max(self.games[-1].priorities))
+                if len(self.games) > self.length:
+                    self.games.pop(0)
+                    self.priorities.pop(0)
 
         print("AFTER APPEND", len(self.games))
         return True
@@ -221,8 +242,8 @@ class MuZeroMemory:
         step_indices = []
         priority_result = []
         section_length = int(len(game_indices) / 16)
-        print("RANGE", sub_section * section_length,
-              sub_section * section_length + section_length)
+        # print("RANGE", sub_section * section_length,
+        #   sub_section * section_length + section_length)
         for i in game_indices[sub_section * section_length: sub_section * section_length + section_length]:
             priorities.append(self.games[i].priorities)
             observations.append(self.games[i].observations)

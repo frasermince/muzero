@@ -18,6 +18,8 @@ from jax.tree_util import register_pytree_node
 import os
 import chex
 from utils import confirm_tpus
+from jax_smi import initialise_tracking
+
 
 # config.update('jax_disable_jit', True)
 jnp.set_printoptions(threshold=sys.maxsize)
@@ -222,21 +224,6 @@ def add_item_jit(i, data):
     return observations, actions, policies, values, rewards, time_steps, env_id, observation, action, policy, value, reward
 
 
-def add_item(i, data):
-    observations, actions, policies, values, rewards, time_steps, env_id, observation, action, policy, value, reward = data
-    id = env_id[i]
-    step = time_steps[id]
-    current_games.observations = current_games.observations.at[id, step].set(
-        observation[i].transpose(1, 2, 0))
-    current_games.actions = current_games.actions.at[id, step].set(action[i])
-    current_games.policies = current_games.policies.at[id, step].set(policy[i])
-    current_games.values = current_games.values.at[id, step].set(value[i])
-    current_games.rewards = current_games.rewards.at[id, step].set(reward[i])
-    # print("ADD", action[i], policy[i], value[i], reward[i])
-    time_steps = time_steps.at[id].set(time_steps[id] + 1)
-    return current_games, time_steps, env_id, observation, action, policy, value, reward
-
-
 # TODO explore if steps are recorded correctly due to async gym
 monte_carlo_fn = jax.pmap(lambda *x: jax.vmap(lambda *y: monte_carlo_tree_search(
     *y), (None, 0, 0, None))(*x), in_axes=((None, 0, 0, None)))
@@ -300,6 +287,9 @@ def play_step(i, p):  # params, current_game_buffer, env_handle, recv, send):
         print("MAX STEP", jnp.max(steps))
         print("negative rewards", jnp.mean(negative_rewards))
         print("rewards", jnp.mean(positive_rewards))
+    if i % 10 == 0:
+        jax.profiler.save_device_memory_profile(
+            "tpu_memory_profile.json")
 
     observations = None
     past_actions = None
@@ -325,9 +315,10 @@ def play_game(key, params, self_play_memories, env, steps, rewards, halting_step
     # return key, self_play_memories, steps, rewards, steps_ready, positive_rewards, negative_rewards
 
 
-@ray.remote(resources={"TPU": 1}, max_restarts=-1, max_task_retries=-1)
+@ray.remote(resources={"PREEMPT_TPU": 1}, max_restarts=-1, max_task_retries=-1)
 class SelfPlayWorker(object):
     def __init__(self, worker_id, num_envs, env_batch_size, key, params_actor, memory):
+        initialise_tracking()
         register_pytree_node(
             SelfPlayMemory,
             experience_replay.self_play_flatten,
@@ -383,9 +374,9 @@ class SelfPlayWorker(object):
         with jax.default_device(cpu):
             finished_game_buffer = jax.device_put(finished_game_buffer, cpu)
             self.memory.append.remote(finished_game_buffer)
+        del finished_game_buffer
 
     def play(self):
-        chex.assert_tpu_available()
         print("***PLAY")
         if self.play_step < 500000:
             temperature = 1
@@ -393,6 +384,9 @@ class SelfPlayWorker(object):
             temperature = 0.5
         else:
             temperature = 0.25
+
+        params = ray.get(self.params_actor.get_target_params.remote())
+        params = jax.device_put(params, jax.devices()[0])
         while True:
             if self.play_step % 50 == 0:
                 params = ray.get(self.params_actor.get_target_params.remote())
@@ -400,5 +394,5 @@ class SelfPlayWorker(object):
             (self.key, _, self.env, self.game_buffer, self.steps, self.rewards, _, self.positive_rewards, self.negative_rewards) = play_step(
                 self.play_step, (self.key, params, self.env, self.game_buffer, self.steps, self.rewards, temperature, self.positive_rewards, self.negative_rewards))
             self.play_step += 1
-            if ((self.steps >= self.halting_steps).sum() >= 8):
+            if ((self.steps >= self.halting_steps).sum() >= 4):
                 self.save_memories()

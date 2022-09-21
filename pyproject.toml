@@ -27,10 +27,13 @@ jaxline = "^0.0.5"
 absl-py = "^1.1.0"
 tensorflow = "^2.9.1"
 ml-collections = "^0.1.1"
-ray = "^2.0.0"
+ray = {extras=["default"], version = "^2.0.0"}
 fabric = "^2.7.1"
 google-api-python-client = "^2.58.0"
 cloud-tpu-profiler = ">=2.3.0"
+aiohttp = "^3.8.1"
+opencensus = "^0.11.0"
+jax-smi = "^1.0.2"
 
 [tool.poetry.dev-dependencies]
 

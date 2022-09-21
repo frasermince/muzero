@@ -109,7 +109,7 @@ def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
     return TensorBoardLogger.remote(config, mode)
 
 
-@ray.remote(resources={"TPU": 1}, max_restarts=-1, max_task_retries=-1)
+@ray.remote(resources={"PREEMPT_TPU": 1}, max_restarts=-1, max_task_retries=-1)
 class JaxlineWorker:
     def __init__(self) -> None:
         register_pytree_node(
