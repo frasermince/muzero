@@ -143,24 +143,13 @@ class MuZeroMemory:
     def get_discount_rate(self):
         return self.discount_rate
 
+    @ray.method(num_returns=64)
     def get_games(self, game_indices):
-        observations = []
-        actions = []
-        values = []
-        policies = []
-        priorities = []
-        rewards = []
 
         for i in game_indices:
             # TODO deal with reset memory here
             # print("FETCH GAME", i, len(self.games))
-            priorities.append(self.games[i].priorities)
-            observations.append(self.games[i].observations)
-            actions.append(self.games[i].actions)
-            values.append(self.games[i].values)
-            policies.append(self.games[i].policies)
-            rewards.append(self.games[i].rewards)
-        return (priorities, observations, actions, values, policies, rewards)
+            yield(self.games[i].priorities, self.games[i].observations, self.games[i].actions, self.games[i].values, self.games[i].policies, self.games[i].rewards)
 
     def get_game(self, i):
         return self.games[i]

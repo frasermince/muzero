@@ -44,6 +44,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
         def __init__(self, mode, init_rng, config, learning_rate=1e-4, normalize_advantages=False, batch_size=64):
             super(MuzeroExperiment, self).__init__(
                 mode=mode, init_rng=init_rng)
+            print("DEVICES", len(jax.devices()))
 
             self.memory_actor = memory_actor
             self.params_actor = params_actor
@@ -197,7 +198,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
              game_indices, step_indices, priorities) = inputs
             params, self._opt_state, scalars, value_difference = (
                 self._update_func(
-                    ray.get(self.params_actor.get_params.remote()), self._opt_state, (
+                    params, self._opt_state, (
                         observations, actions, policies, values, rewards, priorities), rng, global_step
                 ))
             self.params_actor.set_params.remote(params)

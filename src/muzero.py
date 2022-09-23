@@ -43,14 +43,14 @@ class GlobalParamsActor(object):
 def main(argv):
     ray.init(address='auto', include_dashboard=True)
     print("***RESOURCES", ray.nodes())
-    worker_counts = {"self_play": 4, "train": 4, "sample": 3}
+    worker_counts = {"self_play": 8, "train": 8, "sample": 8}
     rollout_size = 5
 
     key = random.PRNGKey(0)
 
     network_key, worker_key = random.split(key)
     memory_actor = MuZeroMemory.options(max_concurrency=16).remote(
-        5000, rollout_size=rollout_size)
+        8000, rollout_size=rollout_size)
     network = MuZeroNet()
     network_key, representation_params, dynamics_params, prediction_params = network.initialize_networks_individual(
         network_key)
@@ -83,7 +83,7 @@ def main(argv):
     print("AFTER WAIT")
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 def sample_workers(memory_sampler, worker_count, key):
     workers = []
     i = 0
@@ -100,7 +100,7 @@ def sample_workers(memory_sampler, worker_count, key):
             print('SAMPLE FAILURE ', i)
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 def jaxline_workers(experiment_class, worker_count):
     jaxline_workers = [JaxlineWorker.remote()
                        for _ in range(worker_count)]
@@ -116,7 +116,7 @@ def jaxline_workers(experiment_class, worker_count):
             print('TRAIN FAILURE ', i)
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 def self_play_workers(worker_key, params_actor, memory_actor, worker_count):
     multiple = 4
     num_envs = multiple * 16

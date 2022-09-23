@@ -9,11 +9,11 @@ cluster_name: muzero
 
 # The maximum number of worker nodes to launch in addition to the head
 # node.
-max_workers: 25
+max_workers: 35
 
 available_node_types:
   ray_head_default:
-    resources: { "CPU": 2 }
+    resources: { "CPU": 1 }
     node_config:
       machineType: n2-standard-2
       disks:

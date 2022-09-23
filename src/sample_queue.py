@@ -46,8 +46,8 @@ class MemorySampler:
                 #  priorities, game_indices, choices) = data
                 # data = (np.stack(observations), np.stack(actions), np.stack(values), np.stack(
                 #     policies), np.stack(rewards), priorities, game_indices, choices)
-                memories = memory_sample(jax.device_put(
-                    full_data, device), self.rollout_size, self.n_step, self.discount_rate)
+                memories = memory_sample(
+                    full_data, self.rollout_size, self.n_step, self.discount_rate)
                 observations = np.reshape(memories["observations"], (training_device_count, int(
                     self.batch_size / training_device_count), 32, 96, 96, 3))
                 actions = np.reshape(memories["actions"], (training_device_count, int(
@@ -96,18 +96,28 @@ class MemorySampler:
         full_policies = []
         full_rewards = []
         number_per_batch = int(len(game_indices) / self.memory_batches)
-        for i in range(self.memory_batches):
-            split_start = number_per_batch * i
-            split_end = number_per_batch * i + number_per_batch
-            # print("FETCHING INDICES", game_indices[split_start: split_end])
-            (priorities, observations, actions, values, policies, rewards) = await self.memory_actor.get_games.remote(game_indices[split_start: split_end])
-            # print("PRIOR", priorities)
-            full_priorities += priorities
-            full_observations += observations
-            full_actions += actions
-            full_values += values
-            full_policies += policies
-            full_rewards += rewards
+        game_generator = self.memory_actor.get_games.remote(game_indices)
+        for item in game_generator:
+            (priorities, observations, actions, values, policies, rewards) = await item
+            full_priorities.append(priorities)
+            full_observations.append(observations)
+            full_actions.append(actions)
+            full_values.append(values)
+            full_policies.append(policies)
+            full_rewards.append(rewards)
+
+        # for i in range(self.memory_batches):
+        #     split_start = number_per_batch * i
+        #     split_end = number_per_batch * i + number_per_batch
+        #     # print("FETCHING INDICES", game_indices[split_start: split_end])
+        #     (priorities, observations, actions, values, policies, rewards) = await self.memory_actor.get_games.remote(game_indices[split_start: split_end])
+        #     # print("PRIOR", priorities)
+        #     full_priorities += priorities
+        #     full_observations += observations
+        #     full_actions += actions
+        #     full_values += values
+        #     full_policies += policies
+        #     full_rewards += rewards
 
         priorities = np.array(full_priorities)
         # for i in game_indices:

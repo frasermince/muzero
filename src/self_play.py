@@ -391,6 +391,7 @@ class SelfPlayWorker(object):
             if self.play_step % 50 == 0:
                 params = ray.get(self.params_actor.get_target_params.remote())
                 params = jax.device_put(params, jax.devices()[0])
+                print("UPDATE PARAMS")
             (self.key, _, self.env, self.game_buffer, self.steps, self.rewards, _, self.positive_rewards, self.negative_rewards) = play_step(
                 self.play_step, (self.key, params, self.env, self.game_buffer, self.steps, self.rewards, temperature, self.positive_rewards, self.negative_rewards))
             self.play_step += 1
