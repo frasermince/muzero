@@ -13,6 +13,13 @@ import time
 from jaxline_platform import JaxlineWorker
 from sample_queue import MemorySampler
 from ray.util.queue import Queue
+import config
+from jaxline import base_config
+from ml_collections import config_dict
+from typing import Any, Mapping
+import numpy as np
+import tensorflow as tf
+import os
 
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
@@ -39,10 +46,46 @@ class GlobalParamsActor(object):
             self.sync_target_params()
 
 
+def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
+    """Creates an object to be used as a writer."""
+    return TensorBoardLogger.remote(config, mode)
+
+
+@ray.remote(max_restarts=-1, max_task_retries=-1)
+class TensorBoardLogger:
+    """Writer to write experiment data to stdout."""
+
+    def __init__(self, config, mode: str):
+        # confirm_tpus(head_node_id)
+        """Initializes the writer."""
+        log_dir = os.path.join(config.checkpoint_dir, mode)
+        self._writer = tf.summary.create_file_writer(log_dir)
+
+    def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
+        """Writes scalars to stdout."""
+        global_step = int(global_step)
+        with self._writer.as_default():
+            for k, v in scalars.items():
+                tf.summary.scalar(k, v, step=global_step)
+        self._writer.flush()
+
+    def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
+        """Writes images to writers that support it."""
+        global_step = int(global_step)
+        with self._writer.as_default():
+            for k, v in images.items():
+                # Tensorboard only accepts [B, H, W, C] but we support [H, W] also.
+                if v.ndim == 2:
+                    v = v[None, ..., None]
+                tf.summary.image(k, v, step=global_step)
+        self._writer.flush()
+
+
 # TODO confirm that target_params and params are being used in the right spot
 def main(argv):
     ray.init(address='auto', include_dashboard=True)
     print("***RESOURCES", ray.nodes())
+
     worker_counts = {"self_play": 8, "train": 8, "sample": 8}
     rollout_size = 5
 
@@ -106,9 +149,13 @@ def jaxline_workers(experiment_class, worker_count):
                        for _ in range(worker_count)]
 
     i = 0
+    jax_config = config.get_config()
+    base_config.validate_config(jax_config)
+    writer = create_writer(jax_config, "train")
+
     while i < 10:
         workers = [jaxline_worker.run.remote(
-            experiment_class) for jaxline_worker in jaxline_workers]
+            experiment_class, writer, jax_config) for jaxline_worker in jaxline_workers]
         i += 1
         try:
             ray.wait(workers)

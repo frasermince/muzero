@@ -74,41 +74,6 @@ def create_checkpointer(
     return utils.InMemoryCheckpointer(config, mode)
 
 
-@ray.remote(max_restarts=-1, max_task_retries=-1)
-class TensorBoardLogger:
-    """Writer to write experiment data to stdout."""
-
-    def __init__(self, config, mode: str):
-        # confirm_tpus(head_node_id)
-        """Initializes the writer."""
-        log_dir = os.path.join(config.checkpoint_dir, mode)
-        self._writer = tf.summary.create_file_writer(log_dir)
-
-    def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
-        """Writes scalars to stdout."""
-        global_step = int(global_step)
-        with self._writer.as_default():
-            for k, v in scalars.items():
-                tf.summary.scalar(k, v, step=global_step)
-        self._writer.flush()
-
-    def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
-        """Writes images to writers that support it."""
-        global_step = int(global_step)
-        with self._writer.as_default():
-            for k, v in images.items():
-                # Tensorboard only accepts [B, H, W, C] but we support [H, W] also.
-                if v.ndim == 2:
-                    v = v[None, ..., None]
-                tf.summary.image(k, v, step=global_step)
-        self._writer.flush()
-
-
-def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
-    """Creates an object to be used as a writer."""
-    return TensorBoardLogger.remote(config, mode)
-
-
 @ray.remote(resources={"PREEMPT_TPU": 1}, max_restarts=-1, max_task_retries=-1)
 class JaxlineWorker:
     def __init__(self) -> None:
@@ -130,26 +95,16 @@ class JaxlineWorker:
             experience_replay.muzero_unflatten
         )
 
-    def run(self, experiment_class):
+    def run(self, experiment_class, writer, jax_config):
         """Main potentially under a debugger."""
         # Make sure the required fields are available in the config.
         chex.assert_tpu_available()
-
-        jax_config = config.get_config()
-        base_config.validate_config(jax_config)
 
         jaxline_mode = "train"
         print("CONFIG", jax_config)
         if jaxline_mode == "train":
             # Run training.
-            writer = create_writer(jax_config, jaxline_mode)
             print("TRAIN", jaxline_train.train)
             jaxline_train.train(experiment_class, jax_config, writer)
-        elif jaxline_mode.startswith("eval"):
-            # Run evaluation.
-            checkpointer = checkpointer_factory(jax_config, jaxline_mode)
-            writer = create_writer(jax_config, jaxline_mode)
-            jaxline_train.evaluate(experiment_class, jax_config, checkpointer, writer,
-                                   jaxline_mode)
         else:
             raise ValueError(f"Mode {jaxline_mode} not recognized.")
