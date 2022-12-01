@@ -11,7 +11,7 @@ import jaxline_platform
 from utils import confirm_tpus
 import time
 from jaxline_platform import JaxlineWorker
-from sample_queue import MemorySampler
+from sample_queue import MemorySampler, RolloutWorker
 from ray.util.queue import Queue
 import config
 from jaxline import base_config
@@ -86,7 +86,7 @@ def main(argv):
     ray.init(address='auto', include_dashboard=True)
     print("***RESOURCES", ray.nodes())
 
-    worker_counts = {"self_play": 8, "train": 8, "sample": 8}
+    worker_counts = {"self_play": 6, "train": 6, "sample": 7, "rollout": 8}
     rollout_size = 5
 
     key = random.PRNGKey(0)
@@ -99,11 +99,16 @@ def main(argv):
         network_key)
     params = (representation_params, dynamics_params, prediction_params)
     params_actor = GlobalParamsActor.remote(params)
+    cpu = jax.devices("cpu")[0]
 
-    sample_actor = Queue(10)
-    memory_sampler = MemorySampler.remote(sample_actor, memory_actor, 64)
+    with jax.default_device(cpu):
+        sample_queue = Queue(25, actor_options={
+            "resources": {"PREEMPT_TPU": 1, "TPU_VM_CPU": 1}, "num_cpus": 1, "max_restarts": -1, "max_task_retries": -1})
+        rollout_queue = Queue(25, actor_options={
+            "resources": {"PREEMPT_TPU": 1, "TPU_VM_CPU": 1}, "num_cpus": 1, "max_restarts": -1, "max_task_retries": -1})
+
     experiment_class = get_experiment_class(
-        memory_actor, params_actor, sample_actor)
+        memory_actor, params_actor, rollout_queue, sample_queue)
 
     flags.mark_flag_as_required('config')
 
@@ -114,8 +119,12 @@ def main(argv):
                                          worker_counts["self_play"])]
     workers += [jaxline_workers.remote(experiment_class,
                                        worker_counts["train"])]
-    workers += [sample_workers.remote(memory_sampler,
+    workers += [sample_workers.remote(sample_queue, memory_actor,
                                       worker_counts["sample"], key)]
+
+    workers += [rollout_workers.remote(sample_queue, rollout_queue,
+                                       worker_counts["rollout"])]
+
     workers_to_run = []
     # for worker in self_play_workers:
     #     if ray.get(worker.has_tpus.remote()):
@@ -127,15 +136,37 @@ def main(argv):
 
 
 @ray.remote(num_cpus=1)
-def sample_workers(memory_sampler, worker_count, key):
+def rollout_workers(sample_queue, rollout_queue, worker_count):
+    workers = []
+    i = 0
+    while i < 10:
+        workers = []
+
+        for _ in range(worker_count):
+            rollout_worker = RolloutWorker.remote(
+                sample_queue, rollout_queue, 64)
+            for _ in range(8):
+                workers += [rollout_worker.rollout.remote()]
+            i += 1
+            try:
+                ray.wait(workers)
+            except ray.exceptions.WorkerCrashedError:
+                print('ROLLOUT FAILURE ', i)
+
+
+@ray.remote(num_cpus=1)
+def sample_workers(sample_queue, memory_actor, worker_count, key):
     workers = []
     i = 0
     while i < 10:
         workers = []
         for _ in range(worker_count):
-            key, sample_key = random.split(key)
-            workers += [memory_sampler.run_queue.remote(
-                sample_key)]
+            memory_sampler = MemorySampler.remote(
+                sample_queue, memory_actor, 64)
+            for _ in range(8):
+                key, sample_key = random.split(key)
+                workers += [memory_sampler.run_queue.remote(
+                    sample_key)]
         i += 1
         try:
             ray.wait(workers)

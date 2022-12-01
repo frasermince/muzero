@@ -13,7 +13,7 @@ max_workers: 35
 
 available_node_types:
   ray_head_default:
-    resources: { "CPU": 1 }
+    resources: { "HEAD_CPU": 1 }
     node_config:
       machineType: n2-standard-2
       disks:
@@ -30,7 +30,7 @@ available_node_types:
 
   ray_tpu:
     min_workers: 1
-    max_workers: 3
+    max_workers: 4
     resources: { "TPU": 1, "CPU": 1 } # use TPU custom resource in your code
     node_config:
       # Only v2-8 and v3-8 accelerator types are currently supported.
@@ -44,7 +44,7 @@ available_node_types:
 
   preempt_ray_tpu:
     min_workers: 9
-    resources: { "PREEMPT_TPU": 1, "CPU": 1 } # use TPU custom resource in your code
+    resources: { "PREEMPT_TPU": 1, "TPU_VM_CPU": 1, "CPU": 1 } # use TPU custom resource in your code
     node_config:
       # Only v2-8 and v3-8 accelerator types are currently supported.
       # Support for TPU pods will be added in the future.

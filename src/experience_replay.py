@@ -149,7 +149,7 @@ class MuZeroMemory:
         for i in game_indices:
             # TODO deal with reset memory here
             # print("FETCH GAME", i, len(self.games))
-            yield(self.games[i].priorities, self.games[i].observations, self.games[i].actions, self.games[i].values, self.games[i].policies, self.games[i].rewards)
+            yield (self.games[i].priorities, self.games[i].observations, self.games[i].actions, self.games[i].values, self.games[i].policies, self.games[i].rewards)
 
     def get_game(self, i):
         return self.games[i]
@@ -159,7 +159,6 @@ class MuZeroMemory:
         return self.priorities
 
     def append(self, self_play_memory):
-        print("BEFORE APPEND", len(self.games))
         cpu = jax.devices("cpu")[0]
         self_play_memory = jax.device_put(self_play_memory, cpu)
         with jax.default_device(cpu):
@@ -173,7 +172,8 @@ class MuZeroMemory:
                     self.games.pop(0)
                     self.priorities.pop(0)
 
-        print("AFTER APPEND", len(self.games))
+        if len(self.games) % 100 == 0 and len(self.games) != self.length:
+            print("MEMORY LENGTH", len(self.games))
         return True
 
     def item_count(self):
@@ -290,10 +290,9 @@ class GameMemory:
             value - self.compute_nstep_value(len(self.priorities), value))
         self.priorities.append(priority)
 
-    def update_priorities(self, priorities, indices):
-        pr = np.array(self.priorities)
-        scatter(pr, 0, indices, priorities.squeeze())
-        self.priorities = np.asarray(pr)
+    def update_priorities(self, priority, index):
+        self.priorities = np.array(self.priorities)
+        self.priorities = self.priorities.at[index].set(priority)
 
     # TODO confirm value targets are correct. See make_target in psuedocode
 

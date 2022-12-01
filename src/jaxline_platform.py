@@ -74,7 +74,7 @@ def create_checkpointer(
     return utils.InMemoryCheckpointer(config, mode)
 
 
-@ray.remote(resources={"PREEMPT_TPU": 1}, max_restarts=-1, max_task_retries=-1)
+@ray.remote(resources={"PREEMPT_TPU": 1, "TPU_VM_CPU": 1}, num_cpus=1, max_restarts=-1, max_task_retries=-1)
 class JaxlineWorker:
     def __init__(self) -> None:
         jax.distributed.initialize()

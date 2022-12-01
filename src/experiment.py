@@ -5,7 +5,7 @@ import numpy as np
 from typing import Generator, Mapping, Text, Tuple, Optional, List
 import time
 from ml_collections import config_dict
-from jaxline import utils as jl_utils
+import jl_utils
 import utils
 from jaxline import experiment
 import optax
@@ -32,7 +32,7 @@ from utils import confirm_tpus
 network = MuZeroNet()
 
 
-def get_experiment_class(memory_actor, params_actor, sample_actor):
+def get_experiment_class(memory_actor, params_actor, rollout_queue, context_queue):
 
     class MuzeroExperiment(experiment.AbstractExperiment):
         CHECKPOINT_ATTRS = {
@@ -182,40 +182,50 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
                  *unused_args, **unused_kwargs):
             """See base class."""
 
+            print("START STEP")
             if self._train_input is None:
                 self._initialize_train()
             # file = open('starting_memories.obj', 'wb')
             # pickle.dump(self.memory, file)
             # file.close()
 
-            # inputs = sample_actor.get(block=True)
+            print("ROLLOUT QUEUE AMOUNT", rollout_queue.qsize())
+            print("CONTEXT QUEUE AMOUNT", context_queue.qsize())
+            # inputs = rollout_queue.get(block=True)
             inputs = next(self._train_input)
+            print("AFTER NEXT")
             while inputs == None:
                 time.sleep(60)
+                print("***WAITING FOR INPUTS***")
                 inputs = next(self._train_input)
 
             (observations, actions, policies, values, rewards,
              game_indices, step_indices, priorities) = inputs
+            print("GOT INPUTS", observations.__class__)
             params, self._opt_state, scalars, value_difference = (
                 self._update_func(
-                    params, self._opt_state, (
+                    ray.get(params_actor.get_params.remote()), self._opt_state, (
                         observations, actions, policies, values, rewards, priorities), rng, global_step
                 ))
+            print("AFTER UPDATE")
             self.params_actor.set_params.remote(params)
 
             # TODO make sure this is right
             assert_shape(value_difference, (self.training_device_count,
                                             self.batch_size / self.training_device_count, None))
+            print("AFTER SET PARAMS")
             value_difference = value_difference.reshape(
                 value_difference.shape[0] * value_difference.shape[1], value_difference.shape[2])
             cpu = jax.devices("cpu")[0]
             value_difference = jax.device_put(value_difference, cpu)
 
+            print("AFTER DEVICE PUT")
             with jax.default_device(cpu):
                 for i in range(value_difference.shape[0]):
                     self.memory_actor.update_priorities.remote(
                         value_difference[i, -1], game_indices[i], step_indices[i])
 
+            print("AFTER PRIORITIES")
             scalars = jl_utils.get_first(scalars)
             if global_step % 10 == 0:
                 print("LOSS", scalars["train_loss"])
@@ -268,7 +278,11 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             # num_devices = jax.device_count()
             device = jax.devices()[0]
             while True:
-                result = sample_actor.get(block=True)
+                result = rollout_queue.get(block=True)
+                (observations, actions, policies, values, rewards,
+                 game_indices, step_indices, priorities) = result
+                result = (jnp.array(observations), jnp.array(actions), jnp.array(policies), jnp.array(values), jnp.array(rewards),
+                          jnp.array(game_indices), jnp.array(step_indices), jnp.array(priorities))
                 jax.device_put(result, device)
                 yield result
 
@@ -321,6 +335,7 @@ def get_experiment_class(memory_actor, params_actor, sample_actor):
             current_value_loss, current_policy_loss, current_reward_loss = losses(
                 0, value, policy, reward, support_value, search_policy, support_reward)
             # TODO INVESTIGATE GRADIENT SCALING
+            print("ACTION SHAPE", actions.shape)
             _, value_loss, policy_loss, reward_loss, _, _, _, _, _, values, new_key = lax.fori_loop(
                 1,
                 actions.shape[1],
