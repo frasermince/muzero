@@ -60,11 +60,13 @@ def initial_expand(environment, state, policy):
 def ucb_count_all_actions(environment, parent_index, first_child_index):
     indices = jnp.array(range(0, 18))
     indices = (indices + first_child_index).astype(jnp.int32)
-    upper_confidence_bound = jnp.sqrt(environment["visit_count"][parent_index])
+    children_visit_count_total = environment["policy"].take(
+        indices, axis=0).sum()
+    upper_confidence_bound = jnp.sqrt(children_visit_count_total)
     visit_count = jnp.take(environment["visit_count"], indices, axis=0)
     upper_confidence_bound /= 1 + visit_count
     upper_confidence_bound *= c1 + \
-        jnp.log((environment["visit_count"][parent_index] + c2 + 1) / c2)
+        jnp.log((children_visit_count_total + c2 + 1) / c2)
     upper_confidence_bound *= environment["policy"].take(indices, axis=0)
     upper_confidence_bound = jnp.where(environment["visit_count"].take(indices, axis=0) > 0, upper_confidence_bound + environment["q_val"].take(
         indices, axis=0) / environment["visit_count"].take(indices, axis=0), upper_confidence_bound)
